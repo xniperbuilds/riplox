@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?><!--
+   Android 11 aur usse neeche (API 31 se pehle) ke liye backup rules.
+   cookies.txt = login session tokens (YouTube/Google/Insta/FB) — ye kabhi
+   Google cloud backup me NAHI jani chahiye. Naye phone pe le jane ke liye
+   app ke andar manual Backup/Restore feature already hai.
+-->
+<full-backup-content>
+    <exclude domain="file" path="cookies.txt" />
+</full-backup-content>

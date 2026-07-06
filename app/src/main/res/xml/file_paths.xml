@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<paths>
+    <!-- Sirf apk_share subfolder expose — poora cacheDir nahi (WebView cache waghera private rahe) -->
+    <cache-path name="apk" path="apk_share/" />
+    <!-- Vault video "Open with" ke liye (sirf jab user khud chooser khole) -->
+    <files-path name="vault" path="vault/" />
+</paths>

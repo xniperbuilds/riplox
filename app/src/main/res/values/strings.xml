@@ -1,0 +1,5 @@
+<resources>
+    <string name="app_name">Riplox</string>
+    <string name="quick_label">⚡ Instant Download</string>
+    <string name="config_label">🎛 Download Options</string>
+</resources>
