@@ -519,6 +519,7 @@ fun runDownload(
     playlistOverride: Boolean? = null,
     subsOverride: Boolean? = null,
     audioFormatOverride: String? = null,
+    onBeat: () -> Unit = {},     // har yt-dlp output pe fire — stall-watchdog ka signal
     onProgress: (Int) -> Unit
 ): String {
     Log.i("XniperDL", "runDownload audio=$audioOnly ${link.take(50)}")
@@ -579,6 +580,7 @@ fun runDownload(
 
         var maxP = 0
         YoutubeDL.getInstance().execute(req, processId) { progress, _, _ ->
+            onBeat() // process zinda hai — watchdog timer reset
             val p = progress.toInt()
             if (p in 0..100 && p > maxP) {
                 maxP = p

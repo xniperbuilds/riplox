@@ -35,6 +35,19 @@ class XniperApp : Application() {
             )
             getSystemService(NotificationManager::class.java).createNotificationChannel(channel)
         }
+
+        // Startup-safai (background thread — UI block nahi):
+        // pruneWork = finished WM jobs ka DB kachra saaf. Temp-clear = crashed
+        // downloads ke orphan dl_* folders (finally cleanup process-death pe nahi
+        // chalta) — sirf tab jab KOI download active na ho.
+        Thread {
+            try {
+                androidx.work.WorkManager.getInstance(this).pruneWork()
+                if (!DownloadQueue.hasActive(this)) clearTempFiles(this)
+            } catch (t: Throwable) {
+                Log.e("XniperApp", "startup cleanup failed", t)
+            }
+        }.start()
     }
 
     companion object {

@@ -48,6 +48,17 @@ class DownloadWorker(
 
     private val progId get() = 4000 + ((id.hashCode() and 0x7FFF) shl 1) // live progress notif
 
+    // Stall-watchdog: yt-dlp ke HAR output pe reset hota. Itni der tak koi output
+    // nahi = process network pe HANG hai (na fail na aage) → kill → retry.
+    // Iske bagair ek hangi download apna slot HAMESHA pakde rehti thi — naye
+    // downloads "start hi nahi" hote the aur sirf Clear-data se theek hota tha.
+    @Volatile private var lastBeat = 0L
+
+    private companion object {
+        const val STALL_MS = 5 * 60 * 1000L   // 5 min no-output = stalled
+        const val WATCH_EVERY_MS = 30_000L    // check interval
+    }
+
     /** Expedited work (Android 12 se neeche) ke liye WM isay khud call karta hai. */
     override suspend fun getForegroundInfo(): ForegroundInfo =
         foregroundInfo(progId, "⬇ Downloading…", "starting…", null)
@@ -95,14 +106,31 @@ class DownloadWorker(
                                 }
                             }
                         }
+                        // Watchdog — STALL_MS tak koi output nahi to process kill (→ retry).
+                        // Slot kabhi permanently jam nahi hota (kal wala "clear data" bug).
+                        lastBeat = System.currentTimeMillis()
+                        val watchdog = launch(Dispatchers.IO) {
+                            while (true) {
+                                kotlinx.coroutines.delay(WATCH_EVERY_MS)
+                                if (System.currentTimeMillis() - lastBeat > STALL_MS) {
+                                    Log.w("XniperDL", "watchdog: no output ${STALL_MS / 1000}s — killing $pid")
+                                    try { YoutubeDL.getInstance().destroyProcessById(pid) } catch (_: Throwable) {}
+                                    break
+                                }
+                            }
+                        }
                         try {
                             withContext(Dispatchers.IO) {
-                                runDownload(ctx, link, audio, fmt, pid, qual, pl, sub, afmt) { p ->
+                                runDownload(
+                                    ctx, link, audio, fmt, pid, qual, pl, sub, afmt,
+                                    onBeat = { lastBeat = System.currentTimeMillis() }
+                                ) { p ->
                                     safeNotify(nm, progId, buildNotif("⬇ $title", "$p%", true, bmp))
                                     setProgressAsync(androidx.work.workDataOf("pct" to p, "title" to title))
                                 }
                             }
                         } finally {
+                            watchdog.cancel()
                             killer.cancel()
                         }
                     }
