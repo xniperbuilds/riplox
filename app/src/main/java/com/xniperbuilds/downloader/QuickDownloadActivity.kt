@@ -8,11 +8,11 @@ import androidx.activity.ComponentActivity
 /**
  * "⚡ Instant Download" share tile — ZERO popup, zero friction.
  *
- * AIRLOCK pattern (double-door):
+ * AIRLOCK pattern (double-door) v2:
  *  Door 1: ye invisible activity khulti hai → app FOREGROUND me (system download rok nahi sakta)
- *  Chamber: link queue me → intezar sirf itna ke worker apni foreground-notification ke
- *           sath LOCK ho jaye (RUNNING) — uske baad wo khud protected hai
- *  Door 2: start CONFIRM hote hi activity band. Net na ho to 4s me band + "queued" message
+ *  Chamber: link queue me → intezar sirf itna ke worker apni FOREGROUND-SERVICE lock laga le
+ *           ("fg" confirm — sirf RUNNING kaafi nahi tha, wohi purana race/stuck bug)
+ *  Door 2: lock CONFIRM hote hi activity band. Net na ho to 10s me band + "queued" message
  *          (net aate hi WorkManager khud start kar dega).
  */
 class QuickDownloadActivity : ComponentActivity() {

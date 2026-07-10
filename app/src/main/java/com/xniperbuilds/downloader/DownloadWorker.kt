@@ -18,7 +18,6 @@ import androidx.work.CoroutineWorker
 import androidx.work.ForegroundInfo
 import androidx.work.NetworkType
 import androidx.work.OneTimeWorkRequestBuilder
-import androidx.work.OutOfQuotaPolicy
 import androidx.work.WorkManager
 import androidx.work.WorkerParameters
 import androidx.work.workDataOf
@@ -81,8 +80,20 @@ class DownloadWorker(
         var title = "Downloading…"
         var bmp: Bitmap? = null
 
-        return try {
+        // FOREGROUND LOCK — door (share-activity/app) khula ho to FGS foran lag jati hai →
+        // download system ke quota/defer/XOS killer se protected. Ye lag jaye us ke BAAD hi
+        // door band hota hai (awaitStart "fg" signal). Background retry pe Android 12+ FGS
+        // start block kar de to bhi download NAHI rokni — job apni window me bina lock ke
+        // chale (progress notifs nm.notify se waise bhi aati hain).
+        val fgLocked = try {
             setForeground(foregroundInfo(progId, "⬇ Downloading…", "starting…", null))
+            true
+        } catch (e: Exception) {
+            Log.w("XniperDL", "FGS lock denied (bg start?) — running unlocked", e)
+            false
+        }
+        return try {
+            setProgressAsync(workDataOf("fg" to fgLocked))
             coroutineScope {
                 val pvJob = launch(Dispatchers.IO) {
                     val pv = try { getPreview(ctx, link) } catch (e: Exception) { null }
@@ -90,7 +101,9 @@ class DownloadWorker(
                         title = pv.title
                         bmp = pv.thumbnail?.let { loadThumb(it) }
                         safeNotify(nm, progId, buildNotif("⬇ $title", "downloading…", true, bmp))
-                        setProgressAsync(androidx.work.workDataOf("title" to title))
+                        // "fg" HAR progress-update me — WM progress poora REPLACE hota hai,
+                        // key chhoot jaye to door ka lock-signal ud jata
+                        setProgressAsync(androidx.work.workDataOf("title" to title, "fg" to fgLocked))
                     }
                 }
                 try {
@@ -126,7 +139,7 @@ class DownloadWorker(
                                     onBeat = { lastBeat = System.currentTimeMillis() }
                                 ) { p ->
                                     safeNotify(nm, progId, buildNotif("⬇ $title", "$p%", true, bmp))
-                                    setProgressAsync(androidx.work.workDataOf("pct" to p, "title" to title))
+                                    setProgressAsync(androidx.work.workDataOf("pct" to p, "title" to title, "fg" to fgLocked))
                                 }
                             }
                         } finally {
@@ -277,9 +290,12 @@ object DownloadQueue {
                 )
             )
             .setConstraints(Constraints.Builder().setRequiredNetworkType(net).build())
-            // EXPEDITED = turant start (XOS/MIUI jaise OEM normal jobs ko app-open tak
-            // DEFER kar dete the — "download start hi nahi hota" isi wajah se tha)
-            .setExpedited(OutOfQuotaPolicy.RUN_AS_NON_EXPEDITED_WORK_REQUEST)
+            // ⚠️ EXPEDITED YAHAN DOBARA MAT LAGANA (2026-07-09 lesson): Android 12+ pe
+            // expedited = QUOTA-job (FGS nahi) — quota sirf app-open pe refill hota, is liye
+            // (a) start app-open tak atakta tha, (b) app band karte hi chalti download beech
+            // me STOP ho jati thi (40% stuck). Turant-start ab AIRLOCK deta hai: door (activity)
+            // foreground me hai → job foran RUNNING → setForeground() se REAL dataSync FGS lock
+            // → quota/defer/app-band sab se azaad.
             .setBackoffCriteria(BackoffPolicy.EXPONENTIAL, 15, TimeUnit.SECONDS)
             .addTag(TAG)
             .build()
@@ -288,15 +304,19 @@ object DownloadQueue {
     }
 
     /**
-     * "AIRLOCK" — share-tile activity ko tab tak zinda rakho jab tak download worker
-     * sach me START na ho jaye (apni foreground-notification ke sath lock ho jaye).
-     * Activity foreground me hai to system (XOS/MIUI) start rok NAHI sakta; start
-     * confirm hote hi door band. Timeout = net na ho/queue full to bhi atko mat.
+     * "AIRLOCK" v2 — share-tile activity ko tab tak zinda rakho jab tak download worker
+     * apni FOREGROUND-SERVICE LOCK ke sath sach me protected na ho jaye.
+     * v1 ka bug: door sirf RUNNING pe band ho jata tha — RUNNING ≠ lock. Activity band
+     * hote hi app background me, aur worker ki setForeground() Android 12+ pe background
+     * se BLOCK ho sakti thi → download unprotected reh jati (app band = stuck).
+     * v2: worker lock lagne ke baad progress me "fg"=true bhejta hai — door SIRF us
+     * confirm pe band hota. Timeout = net na ho/queue full to bhi atko mat (job WM me
+     * safe enqueued hai, net/mauqa milte hi chalegi).
      */
     fun awaitStart(
         activity: androidx.activity.ComponentActivity,
         id: java.util.UUID,
-        timeoutMs: Long = 4000,
+        timeoutMs: Long = 10_000,
         onDone: (started: Boolean) -> Unit
     ) {
         var fired = false
@@ -310,9 +330,10 @@ object DownloadQueue {
             WorkManager.getInstance(activity.applicationContext)
                 .getWorkInfoByIdLiveData(id)
                 .observe(activity) { info ->
-                    if (info != null &&
-                        (info.state == androidx.work.WorkInfo.State.RUNNING || info.state.isFinished)
-                    ) {
+                    if (info == null) return@observe
+                    // fg=true → FGS lock confirm; isFinished → itni tez khatam/fail ke
+                    // intezar ka matlab nahi. Sirf RUNNING pe ab door band NAHI hota.
+                    if (info.progress.getBoolean("fg", false) || info.state.isFinished) {
                         fire(true)
                     }
                 }

@@ -40,6 +40,10 @@ android {
                 storePassword = localProps.getProperty("RIPLOX_KS_PASS")
                 keyAlias = localProps.getProperty("RIPLOX_KEY_ALIAS")
                 keyPassword = localProps.getProperty("RIPLOX_KEY_PASS")
+                // Purane/OEM installers (MIUI etc.) v2-only APK reject kar dete hain →
+                // v1 (JAR) bhi ON rakho taake har phone pe sideload install ho.
+                enableV1Signing = true
+                enableV2Signing = true
             }
         }
     }

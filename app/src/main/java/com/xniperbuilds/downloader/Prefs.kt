@@ -50,8 +50,8 @@ object Prefs {
     fun setAskedDataSaver(c: Context, v: Boolean) = sp(c).edit().putBoolean("askedDataSaver", v).apply()
 
     /**
-     * true (DEFAULT — Seal jaisa) = background queue: turant enqueue, notification me progress,
-     * app band ho to bhi chalti (WorkManager expedited + retry).
+     * true (DEFAULT) = background queue: turant enqueue, notification me progress,
+     * app band ho to bhi chalti (WorkManager + airlock FGS-lock + retry).
      * false = popup progress on screen (jo dekhna chahe).
      * Migration: purane installs pe bhi ek dafa true kar do (pehle popup default tha).
      */
@@ -64,8 +64,8 @@ object Prefs {
     }
     fun setBackgroundMode(c: Context, v: Boolean) = sp(c).edit().putBoolean("backgroundMode", v).apply()
 
-    /** Failed download kitni total attempts (1–5, default 3). */
-    fun maxRetries(c: Context) = sp(c).getInt("maxRetries", 3).coerceIn(1, 5)
+    /** Failed download kitni total attempts (1–5, default 5 = max — Nazim 2026-07-09). */
+    fun maxRetries(c: Context) = sp(c).getInt("maxRetries", 5).coerceIn(1, 5)
     fun setMaxRetries(c: Context, v: Int) = sp(c).edit().putInt("maxRetries", v.coerceIn(1, 5)).apply()
 
     /** Secret Vault feature ON/OFF (Privacy). ON = home-logo tap se vault khulta. */
@@ -83,6 +83,17 @@ object Prefs {
                 .putBoolean("v3Defaults", true)
                 .apply()
         }
+        // 2026-07-09 (Nazim): performance defaults PURANE installs pe bhi ek dafa inject —
+        // 1080p quality + retry max (5) + parallel downloads max (5). User baad me
+        // Settings se badle to dobara overwrite NAHI hota (flag ek hi dafa chalta).
+        if (!s.getBoolean("perfDefaults", false)) {
+            s.edit()
+                .putString("quality", "1080")
+                .putInt("maxRetries", 5)
+                .putInt("simultaneous", 5)
+                .putBoolean("perfDefaults", true)
+                .apply()
+        }
     }
 
     /** Turbo download — aria2c multi-connection engine (direct http files pe).
@@ -96,8 +107,9 @@ object Prefs {
     fun hideBgWarning(c: Context) = sp(c).getBoolean("hideBgWarning", true)
     fun setHideBgWarning(c: Context, v: Boolean) = sp(c).edit().putBoolean("hideBgWarning", v).apply()
 
-    /** Video quality: "best" | "2160" | "1080" | "720" | "480" | "360". */
-    fun quality(c: Context): String = sp(c).getString("quality", "best") ?: "best"
+    /** Video quality: "best" | "2160" | "1080" | "720" | "480" | "360". Default 1080p
+     *  (Nazim 2026-07-09 — "best" kabhi 4K utha leta = slow + bhari files). */
+    fun quality(c: Context): String = sp(c).getString("quality", "1080") ?: "1080"
     fun setQuality(c: Context, v: String) = sp(c).edit().putString("quality", v).apply()
 
     /** Video ke saath subtitles download + embed. */
@@ -216,8 +228,8 @@ object Prefs {
     fun customLocationUri(c: Context): String = sp(c).getString("customLocationUri", "") ?: ""
     fun setCustomLocationUri(c: Context, v: String) = sp(c).edit().putString("customLocationUri", v).apply()
 
-    /** Ek waqt me kitni background downloads chalein (1–5). Default 3. */
-    fun simultaneous(c: Context): Int = sp(c).getInt("simultaneous", 3)
+    /** Ek waqt me kitni background downloads chalein (1–5). Default 5 = max (Nazim 2026-07-09). */
+    fun simultaneous(c: Context): Int = sp(c).getInt("simultaneous", 5)
     fun setSimultaneous(c: Context, v: Int) = sp(c).edit().putInt("simultaneous", v).apply()
 
     /** SponsorBlock — YouTube sponsor segments video se hata do. */
