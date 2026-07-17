@@ -236,6 +236,12 @@ object Prefs {
     fun sponsorBlock(c: Context) = sp(c).getBoolean("sponsorBlock", false)
     fun setSponsorBlock(c: Context, v: Boolean) = sp(c).edit().putBoolean("sponsorBlock", v).apply()
 
+    /** Background-setup guide (battery + auto-start + recents-lock) user ne Done kiya?
+     * XOS-type phones battery-exempt hone ke BAAD bhi auto-start ke bina freeze karte —
+     * is liye banner exemption se azaad, is flag tak dikhta hai. */
+    fun bgSetupDone(c: Context) = sp(c).getBoolean("bgSetupDone", false)
+    fun setBgSetupDone(c: Context, v: Boolean) = sp(c).edit().putBoolean("bgSetupDone", v).apply()
+
     /** Master toggle: cookies use karni hain ya nahi. OFF = saved cookies bhi na bheje. Default ON. */
     fun cookiesEnabled(c: Context) = sp(c).getBoolean("cookiesEnabled", true)
     fun setCookiesEnabled(c: Context, v: Boolean) = sp(c).edit().putBoolean("cookiesEnabled", v).apply()

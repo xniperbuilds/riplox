@@ -37,6 +37,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Download
 import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material3.Icon
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.MaterialTheme
@@ -166,6 +167,13 @@ fun HomeScreen(modifier: Modifier = Modifier) {
         )
     }
     var onboarded by remember { mutableStateOf(Prefs.onboarded(context)) }
+    // XOS/Hiber-type killers: battery exemption ke bina background/Instant downloads
+    // freeze ho jati hain — aur XOS pe exemption KAAFI NAHI (auto-start + recents-lock
+    // bhi chahiye). Banner: jab tak user setup "Done" na kare, YA exemption chhin jaye.
+    var bgRisk by remember {
+        mutableStateOf(!BgGuard.batteryExempt(context) || !Prefs.bgSetupDone(context))
+    }
+    var showBgSetup by remember { mutableStateOf(false) }
 
     // Download = hamesha Options-popup (wahan video/audio/quality choose + choices save hoti hain)
     fun openDownloadPopup() {
@@ -236,6 +244,12 @@ fun HomeScreen(modifier: Modifier = Modifier) {
     LaunchedEffect(refreshTick) {
         recent = withContext(Dispatchers.IO) { History.all(context).take(3) }
         ckSites = connectedSites(context)
+        // Settings se wapsi pe status refresh (exemption mili/chhini to banner update)
+        bgRisk = !BgGuard.batteryExempt(context) || !Prefs.bgSetupDone(context)
+        // Stale/phansi downloads ko dhakka — app khula hai to escort-FGS allowed hai;
+        // ENQUEUED job foran chalegi + worker apna FGS-lock le lega ("app open pe bhi
+        // start nahi hota" ka ilaj).
+        EscortService.kickIfNeeded(context)
     }
 
     if (!onboarded) {
@@ -341,6 +355,37 @@ fun HomeScreen(modifier: Modifier = Modifier) {
                 }
             }
             Spacer(Modifier.height(12.dp))
+        }
+
+        // XOS (Infinix/Tecno) jaise phones background me app FREEZE kar dete hain →
+        // Instant-share downloads app khole bina start/complete nahi hotin. Ye banner
+        // + 3-step setup usi ka permanent ilaj hai (battery + auto-start + recents-lock).
+        if (bgRisk) {
+            Card(modifier = Modifier.fillMaxWidth()) {
+                Column(modifier = Modifier.padding(14.dp)) {
+                    Text(
+                        "⚠️ Background downloads may pause",
+                        fontSize = 14.sp,
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                    Text(
+                        "Your phone freezes apps in the background, so shared downloads can stall until you open Riplox. A 1-minute setup fixes it for good.",
+                        fontSize = 12.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Spacer(Modifier.height(8.dp))
+                    Button(onClick = { showBgSetup = true }, modifier = Modifier.fillMaxWidth()) {
+                        Text("Fix background downloads")
+                    }
+                }
+            }
+            Spacer(Modifier.height(12.dp))
+        }
+        if (showBgSetup) {
+            BgSetupDialog {
+                showBgSetup = false
+                bgRisk = !BgGuard.batteryExempt(context) || !Prefs.bgSetupDone(context)
+            }
         }
 
         // History / About / Update engine → moved to the bottom utility area (branded layout)
@@ -467,6 +512,66 @@ fun HomeScreen(modifier: Modifier = Modifier) {
         Spacer(Modifier.height(28.dp))
     }
 
+}
+
+/** 3-step background-setup dialog — Home banner AUR Settings → Downloads dono se khulta
+ * (banner "Done" ke baad chhup jata hai, Settings wala raasta HAMESHA rehta). Battery
+ * step ka live ✓ status dialog pe wapsi (ON_RESUME) pe refresh hota hai. */
+@Composable
+fun BgSetupDialog(onClose: () -> Unit) {
+    val context = LocalContext.current
+    var battOk by remember { mutableStateOf(BgGuard.batteryExempt(context)) }
+    val lifecycleOwner = androidx.compose.ui.platform.LocalLifecycleOwner.current
+    androidx.compose.runtime.DisposableEffect(lifecycleOwner) {
+        val obs = androidx.lifecycle.LifecycleEventObserver { _, e ->
+            if (e == androidx.lifecycle.Lifecycle.Event.ON_RESUME) battOk = BgGuard.batteryExempt(context)
+        }
+        lifecycleOwner.lifecycle.addObserver(obs)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(obs) }
+    }
+    AlertDialog(
+        onDismissRequest = onClose,
+        title = { Text("Background setup (one time)") },
+        text = {
+            Column {
+                Text(
+                    "Do these 3 steps so downloads keep running with the app closed:",
+                    fontSize = 13.sp
+                )
+                Spacer(Modifier.height(10.dp))
+                Button(
+                    onClick = { BgGuard.requestBatteryExempt(context) },
+                    modifier = Modifier.fillMaxWidth()
+                ) { Text(if (battOk) "1 · Battery ✓ already allowed" else "1 · Allow battery (tap → Allow)") }
+                Spacer(Modifier.height(8.dp))
+                Button(
+                    onClick = {
+                        if (!BgGuard.openAutoStart(context)) {
+                            Toast.makeText(context, "Couldn't open — enable Auto-start in phone settings", Toast.LENGTH_LONG).show()
+                        }
+                    },
+                    modifier = Modifier.fillMaxWidth()
+                ) { Text("2 · Turn ON Auto-start for Riplox") }
+                Text(
+                    "No Auto-start list on your phone? Then: App info → Battery → Allow Background Usage (ON).",
+                    fontSize = 10.5.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Spacer(Modifier.height(10.dp))
+                Text(
+                    "3 · Open Recent apps, hold the Riplox card and tap the 🔒 lock — this stops the phone from killing it.",
+                    fontSize = 12.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = {
+                Prefs.setBgSetupDone(context, true)
+                onClose()
+            }) { Text("Done") }
+        }
+    )
 }
 
 /** Recent-row ke liye platform emoji. */

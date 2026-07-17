@@ -31,13 +31,29 @@ fun platformFolder(url: String): String {
     }
 }
 
+/** Chunk-wise copy + har chunk pe onCopy(totalBytesCopied) — save-phase ke "beats".
+ * Iske bagair bada file copy watchdog/notif ke liye 100% pe "khamosh maut" tha. */
+private fun copyChunked(input: java.io.InputStream, out: java.io.OutputStream, onCopy: (Long) -> Unit) {
+    val buf = ByteArray(256 * 1024)
+    var total = 0L
+    while (true) {
+        val n = input.read(buf)
+        if (n < 0) break
+        out.write(buf, 0, n)
+        total += n
+        onCopy(total)
+    }
+    out.flush()
+}
+
 /** MediaStore me file likho (IS_PENDING flow) — fail ho to adhoori row delete (orphan na bache). */
 private fun insertMedia(
     context: Context,
     contentUri: Uri,
     temp: File,
     mime: String,
-    relPath: String
+    relPath: String,
+    onCopy: (Long) -> Unit = {}
 ): String {
     val resolver = context.contentResolver
     val values = ContentValues().apply {
@@ -49,7 +65,7 @@ private fun insertMedia(
     val uri = resolver.insert(contentUri, values) ?: throw Exception("MediaStore insert failed")
     try {
         resolver.openOutputStream(uri)?.use { out ->
-            temp.inputStream().use { input -> input.copyTo(out) }
+            temp.inputStream().use { input -> copyChunked(input, out, onCopy) }
         } ?: throw Exception("Output stream null")
         val done = ContentValues().apply { put(MediaStore.MediaColumns.IS_PENDING, 0) }
         resolver.update(uri, done, null, null)
@@ -62,15 +78,15 @@ private fun insertMedia(
 }
 
 /** API 29+ : temp file ko Movies/XniperBuilds/<platform>/ me copy (gallery-visible). */
-fun saveVideoToGallery(context: Context, temp: File, platform: String): String = insertMedia(
+fun saveVideoToGallery(context: Context, temp: File, platform: String, onCopy: (Long) -> Unit = {}): String = insertMedia(
     context, MediaStore.Video.Media.EXTERNAL_CONTENT_URI, temp,
-    mimeForExt(temp.extension, audioOnly = false), "${Environment.DIRECTORY_MOVIES}/XniperBuilds/$platform"
+    mimeForExt(temp.extension, audioOnly = false), "${Environment.DIRECTORY_MOVIES}/XniperBuilds/$platform", onCopy
 )
 
 /** API 29+ : audio ko Music/XniperBuilds/<platform>/ me copy. */
-fun saveAudioToMusic(context: Context, temp: File, platform: String): String = insertMedia(
+fun saveAudioToMusic(context: Context, temp: File, platform: String, onCopy: (Long) -> Unit = {}): String = insertMedia(
     context, MediaStore.Audio.Media.EXTERNAL_CONTENT_URI, temp,
-    mimeForExt(temp.extension, audioOnly = true), "${Environment.DIRECTORY_MUSIC}/XniperBuilds/$platform"
+    mimeForExt(temp.extension, audioOnly = true), "${Environment.DIRECTORY_MUSIC}/XniperBuilds/$platform", onCopy
 )
 
 /** Thumbnail ko Pictures/XniperBuilds/<platform>/ me save karo. */
@@ -94,20 +110,21 @@ fun saveImageToPictures(context: Context, temp: File, platform: String): String 
  * API 29+ = MediaStore. API 26–28 = public folder me seedha copy + media scan
  * (WRITE permission na ho to app ke apne external folder me — file phir bhi bachti hai).
  */
-fun savePublic(context: Context, temp: File, platform: String, audioOnly: Boolean): String =
+fun savePublic(context: Context, temp: File, platform: String, audioOnly: Boolean, onCopy: (Long) -> Unit = {}): String =
     if (Build.VERSION.SDK_INT >= 29) {
-        if (audioOnly) saveAudioToMusic(context, temp, platform)
-        else saveVideoToGallery(context, temp, platform)
+        if (audioOnly) saveAudioToMusic(context, temp, platform, onCopy)
+        else saveVideoToGallery(context, temp, platform, onCopy)
     } else {
         saveLegacyPublic(
             context, temp, platform,
-            if (audioOnly) Environment.DIRECTORY_MUSIC else Environment.DIRECTORY_MOVIES
+            if (audioOnly) Environment.DIRECTORY_MUSIC else Environment.DIRECTORY_MOVIES,
+            onCopy
         )
     }
 
 /** API 26–28: RELATIVE_PATH nahi hota — file copy + MediaScanner. Kabhi delete-without-copy nahi. */
 @Suppress("DEPRECATION")
-fun saveLegacyPublic(context: Context, temp: File, platform: String, publicDirType: String): String {
+fun saveLegacyPublic(context: Context, temp: File, platform: String, publicDirType: String, onCopy: (Long) -> Unit = {}): String {
     val canWrite = ContextCompat.checkSelfPermission(
         context, android.Manifest.permission.WRITE_EXTERNAL_STORAGE
     ) == PackageManager.PERMISSION_GRANTED
@@ -124,7 +141,9 @@ fun saveLegacyPublic(context: Context, temp: File, platform: String, publicDirTy
         dest = File(dir, "${temp.nameWithoutExtension}_$i.${temp.extension}")
         i++
     }
-    temp.copyTo(dest, overwrite = false)
+    dest.outputStream().use { out ->
+        temp.inputStream().use { input -> copyChunked(input, out, onCopy) }
+    }
     temp.delete()
     try {
         MediaScannerConnection.scanFile(context, arrayOf(dest.absolutePath), null, null)
@@ -186,7 +205,7 @@ private fun findOrCreateChildDir(context: Context, treeUri: Uri, name: String): 
 }
 
 /** Custom SAF folder me save (platform subfolder). Return = file ka content uri string. */
-fun saveToCustomTree(context: Context, temp: File, platform: String, treeUri: Uri, audioOnly: Boolean): String {
+fun saveToCustomTree(context: Context, temp: File, platform: String, treeUri: Uri, audioOnly: Boolean, onCopy: (Long) -> Unit = {}): String {
     val resolver = context.contentResolver
     val dirUri = findOrCreateChildDir(context, treeUri, "XniperBuilds")
     // platform subfolder XniperBuilds ke andar
@@ -195,7 +214,7 @@ fun saveToCustomTree(context: Context, temp: File, platform: String, treeUri: Ur
         resolver, subUri, mimeForExt(temp.extension, audioOnly), temp.name
     ) ?: throw Exception("Couldn't create file in the custom folder")
     resolver.openOutputStream(fileUri)?.use { out ->
-        temp.inputStream().use { it.copyTo(out) }
+        temp.inputStream().use { input -> copyChunked(input, out, onCopy) }
     } ?: throw Exception("Output stream null")
     temp.delete()
     return fileUri.toString()

@@ -504,6 +504,25 @@ fun clearTempFiles(context: Context): Long {
     return freed
 }
 
+/** Startup-safai ka SAFE variant — sirf 24h+ purane dl_* folders (naam me timestamp hai).
+ * ⚠️ Poora clearTempFiles startup pe race karta tha: ENQUEUED job app-open pe usi second
+ * RUNNING hoti thi aur uska taaza temp folder cleanup uDa deta tha → download "chalti"
+ * par file gayab → File not found / 100% stuck. Age-check se race namumkin. */
+fun clearStaleTempFiles(context: Context, olderThanMs: Long = 24 * 60 * 60 * 1000L): Long {
+    val base = context.getExternalFilesDir("temp") ?: return 0L
+    val cutoff = System.currentTimeMillis() - olderThanMs
+    var freed = 0L
+    base.listFiles()?.forEach { f ->
+        val ts = f.name.removePrefix("dl_").substringBefore('_').toLongOrNull()
+        val stale = if (ts != null) ts < cutoff else f.lastModified() < cutoff
+        if (stale) {
+            freed += f.walkBottomUp().filter { it.isFile }.sumOf { it.length() }
+            f.deleteRecursively()
+        }
+    }
+    return freed
+}
+
 // ============================================================================
 // POPUP MODE (default) — poora yt-dlp download + gallery save, live progress.
 // Activity FOREGROUND rehte call karo. Har site chalti (IG/TikTok samet).
@@ -520,6 +539,7 @@ fun runDownload(
     subsOverride: Boolean? = null,
     audioFormatOverride: String? = null,
     onBeat: () -> Unit = {},     // har yt-dlp output pe fire — stall-watchdog ka signal
+    onSave: (Int) -> Unit = {},  // gallery/custom-save copy progress (0–100) — "Finishing" phase visible + beats
     onProgress: (Int) -> Unit
 ): String {
     Log.i("XniperDL", "runDownload audio=$audioOnly ${link.take(50)}")
@@ -612,17 +632,29 @@ fun runDownload(
         var saved = 0
         for (file in media) {
             val fname = file.name
+            // Save-copy ke "beats": har chunk pe watchdog reset + pct-change pe onSave —
+            // bade file ki gallery-copy ab na watchdog se marti hai na "100% stuck" dikhti.
+            val total = file.length().coerceAtLeast(1)
+            var lastSaveP = -1
+            val onCopy: (Long) -> Unit = { copied ->
+                onBeat()
+                val sp = ((copied * 100) / total).toInt().coerceIn(0, 100)
+                if (sp != lastSaveP) {
+                    lastSaveP = sp
+                    onSave(sp)
+                }
+            }
             val galleryDisplay = "${if (audioOnly) "Music" else "Movies"}/XniperBuilds/$platform/$fname"
             val (location, display) = if (custom.isNotBlank()) {
                 try {
-                    saveToCustomTree(context, file, platform, Uri.parse(custom), audioOnly) to
+                    saveToCustomTree(context, file, platform, Uri.parse(custom), audioOnly, onCopy) to
                         "Custom folder/XniperBuilds/$platform/$fname"
                 } catch (e: Exception) {
                     Log.e("XniperDL", "custom save fail → gallery", e)
-                    savePublic(context, file, platform, audioOnly) to "$galleryDisplay (custom fail → gallery)"
+                    savePublic(context, file, platform, audioOnly, onCopy) to "$galleryDisplay (custom fail → gallery)"
                 }
             } else {
-                savePublic(context, file, platform, audioOnly) to galleryDisplay
+                savePublic(context, file, platform, audioOnly, onCopy) to galleryDisplay
             }
             if (!Prefs.incognito(context)) {
                 History.add(context, link, fname, platform, location, audioOnly)

@@ -219,6 +219,22 @@ private fun DownloadsPage() {
     var subs by remember { mutableStateOf(Prefs.subs(context)) }
     var playlist by remember { mutableStateOf(Prefs.playlist(context)) }
     var simultaneous by remember { mutableStateOf(Prefs.simultaneous(context)) }
+    var showBgSetup by remember { mutableStateOf(false) }
+
+    // Background-setup ka PERMANENT raasta — Home banner "Done" ke baad dobara nahi
+    // dikhta (Nazim 2026-07-16: "card nahi dikh raha"), yahan hamesha milega.
+    OutlinedButton(onClick = { showBgSetup = true }, modifier = Modifier.fillMaxWidth()) {
+        Text("🛡 Fix background downloads")
+    }
+    Text(
+        "Battery + auto-start + recents-lock — so downloads never pause when the app is closed.",
+        fontSize = 11.sp,
+        color = MaterialTheme.colorScheme.onSurfaceVariant
+    )
+    Spacer(Modifier.height(10.dp))
+    if (showBgSetup) {
+        BgSetupDialog { showBgSetup = false }
+    }
 
     // Note: video/audio, quality, subs, playlist — download popup me choose hote hi SAVE
     // ho jate hain (wahi defaults ban jate hain). Isliye yahan extra toggles nahi.

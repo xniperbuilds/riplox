@@ -66,6 +66,9 @@ private fun DownloadsScreen(modifier: Modifier = Modifier) {
 
     // Live refresh — har second WorkManager ka state (simple + reliable)
     LaunchedEffect(Unit) {
+        // Page khula = user download ka intezar kar raha — phansi ENQUEUED job ho to
+        // escort se turant start karwao.
+        EscortService.kickIfNeeded(context)
         while (true) {
             infos = withContext(Dispatchers.IO) {
                 try {
