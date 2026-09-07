@@ -6,7 +6,7 @@
 
 **Rip anything. Keep everything.**
 
-Free & open-source video / audio downloader for Android — 1000+ sites, up to 4K, MP3, no third-party ads, no watermarks.
+Free & open-source video / audio downloader for Android — 1000+ sites, up to 4K, MP3, no ads, no watermarks.
 
 [![Release](https://img.shields.io/github/v/release/xniperbuilds/riplox?label=Download&color=3E4E68)](https://github.com/xniperbuilds/riplox/releases/latest)
 [![Downloads](https://img.shields.io/github/downloads/xniperbuilds/riplox/total?color=3E4E68)](https://github.com/xniperbuilds/riplox/releases)
@@ -38,7 +38,7 @@ Free & open-source video / audio downloader for Android — 1000+ sites, up to 4
 - 🔒 **Secret Vault** — fingerprint/PIN-locked hidden storage; vault files disappear from gallery, history and backups
 - 📜 **History & Trash** — search, filter, multi-select, link export/import (optionally password-protected file)
 - 🎨 **Clean dark UI** — AMOLED black, Material 3, no clutter
-- 🚫 **No ad networks. No tracking. No analytics.** The only promotion you'll see is a strip for our own apps.
+- 🚫 **No ads. No tracking. No analytics.** No ad SDK, no advertiser, nothing sold — just a strip pointing at our own apps.
 
 ## Install
 
