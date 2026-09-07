@@ -85,6 +85,42 @@ class DownloadWorker(
     override suspend fun getForegroundInfo(): ForegroundInfo =
         foregroundInfo(progId, "⬇ Downloading…", "starting…", null)
 
+    /** Aaj ka din (yyyyMMdd) — engine/self-heal ki throttling ke liye. */
+    private fun today(): String =
+        java.text.SimpleDateFormat("yyyyMMdd", java.util.Locale.US).format(java.util.Date())
+
+    /**
+     * Is job ke ALAWA koi aur download zinda hai?
+     *
+     * `DownloadQueue.hasActive()` kaam nahi deta — wo KHUD is job ko bhi ginta hai.
+     * Engine ki binary tabhi badli ja sakti hai jab koi doosri download na chal rahi ho
+     * (DownloadGate ek waqt me 5 tak chalne deta hai).
+     */
+    private suspend fun otherWorkActive(): Boolean = withContext(Dispatchers.IO) {
+        try {
+            WorkManager.getInstance(ctx.applicationContext)
+                .getWorkInfosByTag(DownloadQueue.TAG).get()
+                .any {
+                    it.id != id && (
+                        it.state == androidx.work.WorkInfo.State.RUNNING ||
+                            it.state == androidx.work.WorkInfo.State.ENQUEUED
+                        )
+                }
+        } catch (e: Exception) {
+            // Pata nahi chala to mehfooz raasta: samjho koi chal rahi hai (update skip).
+            true
+        }
+    }
+
+    /**
+     * Self-heal ka darwaza khula hai?
+     *
+     * Throttle lazmi hai: bagair is ke 5 retries × kai downloads = baar baar ~10MB ka engine,
+     * aur mobile data pe. Din me ek dafa kaafi hai — engine roz se zyada nahi badalta.
+     */
+    private fun selfHealDue(): Boolean =
+        Prefs.lastSelfHealDay(ctx) != today() && !(Prefs.wifiOnly(ctx) && isMetered(ctx))
+
     override suspend fun doWork(): Result {
         val link = inputData.getString("link") ?: return Result.failure()
         val audio = inputData.getBoolean("audio", false)
@@ -98,10 +134,31 @@ class DownloadWorker(
         val doneId = progId + 1 // final (success/fail) notif
         val pid = "wk_$id" // yt-dlp process id — Cancel pe isi se process kill hota hai
 
+        // ENGINE KA ROZANA CHECK — YAHAN, kisi Activity me NAHI.
+        // Pehle ye sirf MainActivity me tha: jo banda hamesha doosri app ki share sheet se
+        // download karta hai wo MainActivity kabhi kholta hi nahi, is liye uska yt-dlp KABHI
+        // update nahi hota tha — aur purana yt-dlp = "No video formats found".
+        // ⚠️ Share-activity me lagana ghalat hota: wo enqueue kar ke hath uthati hai, aur us
+        // lamhe binary badalna chalti hui job ke neeche se farsh kheenchna hai. Worker apni
+        // download ke sath serialized hai, is liye mehfooz jagah yehi hai.
+        // ⚠️ Sirf PEHLI attempt pe, aur sirf jab is ke ilawa koi download zinda na ho
+        // (5 tak saath chal sakti hain — DownloadGate).
+        if (runAttemptCount == 0 && Engine.dueNow(ctx)) {
+            try {
+                if (!otherWorkActive()) Engine.update(ctx)
+            } catch (e: Exception) {
+                Log.w("XniperDL", "daily engine check skipped: ${e.message}")
+            }
+        }
+
         // Title/thumbnail PARALLEL me aate hain — pehle ye download se PEHLE serial the
         // (har download +15-40s slow + notif late). Ab notif turant, download turant.
         var title = "Downloading…"
         var bmp: Bitmap? = null
+        // Share-sheet ki thumbnail ka URL. `title` ki tarah HAR progress-update me jata hai —
+        // WM progress poora REPLACE hota hai, is liye ek dafa bhejna kaafi nahi (jo sheet
+        // baad me observe karna shuru kare usay phir kabhi thumbnail nahi milti).
+        var thumbUrl = ""
 
         // FOREGROUND LOCK — door (share-activity/app) khula ho to FGS foran lag jati hai →
         // download system ke quota/defer/XOS killer se protected. Ye lag jaye us ke BAAD hi
@@ -154,7 +211,7 @@ class DownloadWorker(
                         try {
                             setForeground(foregroundInfo(progId, "⬇ $title", "downloading…", bmp))
                             fgLocked = true
-                            setProgressAsync(workDataOf("fg" to true, "title" to title))
+                            setProgressAsync(workDataOf("fg" to true, "title" to title, "thumb" to thumbUrl))
                             Log.i("XniperDL", "FGS lock acquired late (retry)")
                         } catch (_: Exception) {
                         }
@@ -164,11 +221,19 @@ class DownloadWorker(
                     val pv = try { getPreview(ctx, link) } catch (e: Exception) { null }
                     if (pv != null) {
                         title = pv.title
+                        thumbUrl = pv.thumbnail.orEmpty()
                         bmp = pv.thumbnail?.let { loadThumb(it) }
                         safeNotify(nm, progId, buildNotif("⬇ $title", "downloading…", true, bmp))
                         // "fg" HAR progress-update me — WM progress poora REPLACE hota hai,
-                        // key chhoot jaye to door ka lock-signal ud jata
-                        setProgressAsync(androidx.work.workDataOf("title" to title, "fg" to fgLocked))
+                        // key chhoot jaye to door ka lock-signal ud jata.
+                        // "thumb" share-sheet ke liye — usi ek data me, warna replace me urr jata.
+                        setProgressAsync(
+                            androidx.work.workDataOf(
+                                "title" to title,
+                                "thumb" to thumbUrl,
+                                "fg" to fgLocked
+                            )
+                        )
                     }
                 }
                 try {
@@ -208,13 +273,18 @@ class DownloadWorker(
                                 // BAAKI hote hain — "100%" atka na lage, saaf batao.
                                 val txt = if (p >= 99) "Finishing — merging & saving…" else "$p%"
                                 safeNotify(nm, progId, buildNotif("⬇ $title", txt, true, bmp))
-                                setProgressAsync(androidx.work.workDataOf("pct" to p, "title" to title, "fg" to fgLocked))
+                                setProgressAsync(
+                                    androidx.work.workDataOf(
+                                        "pct" to p, "title" to title,
+                                        "thumb" to thumbUrl, "fg" to fgLocked
+                                    )
+                                )
                             }
                         }
                         // Watchdog — stall pe kill (→ retry). Merge/finishing phase (pct ≥ 99)
                         // me yt-dlp LEGIT silent hota hai (ffmpeg output nahi deta) — wahan
                         // 20-min window, warna healthy 100% merge kill ho ke 0 se retry hota
-                        // tha = Nazim ka "100% pe stuck" loop.
+                        // tha = wahi "100% pe stuck" loop.
                         val watchdog = launch(Dispatchers.IO) {
                             while (true) {
                                 kotlinx.coroutines.delay(WATCH_EVERY_MS)
@@ -243,11 +313,13 @@ class DownloadWorker(
                             killer.cancel()
                         }
                     }
-                    // Done-notif: thumbnail bada + ▶ Play action (abhi save hui file kholta)
-                    val playLoc = withContext(Dispatchers.IO) {
-                        try { History.all(ctx).firstOrNull()?.location } catch (e: Exception) { null }
+                    // Done-notif: thumbnail bada + tap = abhi save hui file khule.
+                    // ⚠️ Poora RECORD chahiye, sirf location nahi — photo post ka tap
+                    // PlayerActivity pe nahi, gallery viewer pe jana chahiye (viewIntentFor).
+                    val savedRec = withContext(Dispatchers.IO) {
+                        try { History.all(ctx).firstOrNull() } catch (e: Exception) { null }
                     }
-                    safeNotify(nm, doneId, buildNotif("✓ $title", where, false, bmp, bigPicture = true, playUri = playLoc))
+                    safeNotify(nm, doneId, buildNotif("✓ $title", where, false, bmp, bigPicture = true, playRec = savedRec))
                 } finally {
                     pvJob.cancel()
                     fgRetry?.cancel()
@@ -258,8 +330,29 @@ class DownloadWorker(
             throw e // user ne Cancel dabaya — retry/fail-notif nahi
         } catch (e: Exception) {
             Log.e("XniperDL", "worker fail (attempt $runAttemptCount)", e)
+            // LOGIN-DEEWAR = FORAN FAIL, retry bilkul nahi.
+            // Insta/TikTok/YouTube ka "pehle connect karo" wala jawab dobara koshish se KABHI
+            // nahi badalta. Pehle ye bhi paanch dafa retry hoti thi (exponential backoff ⇒ kai
+            // minute), aur user ko wo jumla sab ke BAAD dikhta tha jo hum attempt 0 pe hi jaante
+            // the — na sirf intezar, balki us doran har koshish us site pe ek aur nakaam request.
+            val wall = try { loginWallSite(ctx, link, e.message) } catch (_: Exception) { null }
+
             // Retry count user-settable (Settings → Downloads, default 3 total attempts)
-            if (runAttemptCount < Prefs.maxRetries(ctx) - 1) {
+            if (wall == null && runAttemptCount < Prefs.maxRetries(ctx) - 1) {
+                // SELF-HEAL — pehli nakami agar purane engine jaisi lagti hai to retry se
+                // PEHLE engine update karo. Ye koi extra attempt nahi leta: retry waise bhi
+                // honi thi, bas ab wo naye engine ke sath hoti hai.
+                // Pehle aisa kuch tha hi nahi — extractor purana ho jane par download
+                // hamesha ke liye fail ho jati thi aur user ko sirf "Unable to extract" milta.
+                if (runAttemptCount == 0 && Engine.looksStale(e.message) && selfHealDue()) {
+                    Prefs.setLastSelfHealDay(ctx, today())
+                    try {
+                        safeNotify(nm, progId, buildNotif("⬇ $title", "Updating engine…", true, bmp))
+                        Engine.update(ctx)
+                    } catch (ex: Exception) {
+                        Log.w("XniperDL", "self-heal update failed: ${ex.message}")
+                    }
+                }
                 Result.retry()
             } else {
                 val msg = smartError(ctx, link, e.message)
@@ -295,7 +388,7 @@ class DownloadWorker(
         ongoing: Boolean,
         largeIcon: Bitmap?,
         bigPicture: Boolean = false,
-        playUri: String? = null,
+        playRec: DownloadRecord? = null,
         openDownloads: Boolean = false
     ): Notification {
         val icon = if (ongoing) android.R.drawable.stat_sys_download
@@ -325,8 +418,7 @@ class DownloadWorker(
         if (!ongoing) {
             try {
                 val tapIntent = when {
-                    playUri != null -> Intent(ctx, PlayerActivity::class.java)
-                        .setData(Uri.parse(playUri))
+                    playRec != null -> viewIntentFor(ctx, playRec)
                         .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
                     openDownloads -> Intent(ctx, DownloadsActivity::class.java)
                         .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
@@ -334,13 +426,15 @@ class DownloadWorker(
                         .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
                 }
                 val pi = PendingIntent.getActivity(
-                    ctx, (playUri ?: title).hashCode(),
+                    ctx, (playRec?.location ?: title).hashCode(),
                     tapIntent,
                     PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
                 )
                 b.setContentIntent(pi)
                 b.setAutoCancel(true)
-                if (playUri != null) b.addAction(0, "▶ Play", pi)
+                if (playRec != null) {
+                    b.addAction(0, if (playRec.isImage) "🖼 View" else "▶ Play", pi)
+                }
             } catch (_: Exception) {
             }
         }

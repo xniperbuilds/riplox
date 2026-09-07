@@ -3,6 +3,25 @@
 All notable changes to Riplox are documented here.
 Versioning: **MAJOR.MINOR.PATCH** — new features bump MINOR, fixes bump PATCH.
 
+## [1.1.0] — 2026-09-07
+
+Photo posts now download, sharing shows real progress, and the engine keeps itself current — even if you never open the app.
+
+### Added
+- **Photo posts** — Instagram carousels, TikTok slideshows and image posts now download and land in **Pictures**, opening in your gallery instead of failing with "File not found"
+- **Live progress when you share** — the ⚡ Instant tile now shows a sheet with the title, thumbnail, a progress bar, **Cancel**, and **Open / Share** when it's done, instead of a toast that vanished
+- **Update & retry** — one tap on a failed download refreshes the engine and tries again
+- **Batch paste** — paste several links at once and every one of them is queued
+- **Photo** filter in History, with the right icon and the right app when you tap
+- **Update engine** in Settings → Downloads, showing the engine version, when it was last checked, and what actually happened
+- A notice on the home screen when a **newer Riplox** has been released
+
+### Fixed
+- Anyone who only downloaded from another app's share sheet **never got engine updates** — every download now keeps the engine current, so sites don't quietly stop working
+- A failed download caused by an out-of-date engine now updates and retries itself once, instead of failing for good
+- "Engine updated" used to be shown even when the update had failed — it now reports what really happened
+- Photo files were saved as videos: wrong gallery album, wrong file type, and tapping one opened a video player that could never play it
+
 ## [1.0.2] — 2026-07-17
 
 Background downloads made bulletproof — start instantly, never jam, real progress all the way to the gallery.

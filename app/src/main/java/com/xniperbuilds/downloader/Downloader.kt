@@ -10,18 +10,52 @@ import com.yausername.youtubedl_android.YoutubeDLRequest
 import org.json.JSONObject
 import java.io.File
 
+/**
+ * Link ka regex — EK jagah, `extractUrl` aur `extractUrls` dono ke liye.
+ *
+ * ⚠️ IGNORE_CASE lazmi hai: keyboard ka auto-capitalize (aur kuch apps ka share text)
+ * "Https://" bhej deta hai, aur wo chup-chaap gir jata tha — user ko bas itna dikhta ke
+ * uska link "ginaa hi nahi gaya". Device pe pakda gaya, 7-Sep-2026.
+ */
+private val URL_RE = Regex("https?://\\S+", RegexOption.IGNORE_CASE)
+
 /** Share ke text me se pehla http(s) link nikaalo. */
 fun extractUrl(text: String?): String? {
     if (text.isNullOrBlank()) return null
-    val found = Regex("https?://\\S+").find(text)?.value ?: text.trim()
+    val found = URL_RE.find(text)?.value ?: text.trim()
     // share-text me link ke aakhir me lagi punctuation hata do
     return found.trimEnd('.', ',', ')', ']', '!', '?', ';', '"', '\'')
+}
+
+/**
+ * Text me se SAB http(s) link nikaalo — batch paste ke liye.
+ *
+ * Duplicate hata dete hain: WhatsApp/Notes se copy kiya hua text me wahi link do dafa aana
+ * aam hai, aur ek hi cheez do dafa download karna sirf data aur waqt ka zaya hai.
+ */
+fun extractUrls(text: String?): List<String> {
+    if (text.isNullOrBlank()) return emptyList()
+    return URL_RE.findAll(text)
+        .map { it.value.trimEnd('.', ',', ')', ']', '!', '?', ';', '"', '\'') }
+        .filter { it.length > "https://".length }
+        .distinct()
+        .toList()
 }
 
 /** Preview info (thumbnail + title) — download se pehle dikhane ke liye. */
 data class Preview(val title: String, val uploader: String, val thumbnail: String?, val duration: Long)
 
 fun getPreview(context: Context, link: String): Preview {
+    // Instagram pe Route 0 pehle — aur ye muft hai, kyunki download bhi abhi wahi JSON
+    // maangne wala hai aur extractor usay cache kar leta hai. Warna preview ek DOOSRA
+    // yt-dlp process chalati thi sirf title aur thumbnail ke liye, usi post pe.
+    try {
+        InstagramExtractor.fetch(context, link)?.let {
+            return Preview(it.title, it.user, it.thumb, 0L)
+        }
+    } catch (e: Exception) {
+        Log.w("XniperDL", "route0 preview failed — engine se: ${e.message}")
+    }
     val req = YoutubeDLRequest(link)
     req.addOption("--no-playlist")
     req.addOption("--no-warnings")
@@ -347,21 +381,35 @@ fun clearArchive(context: Context) {
 /**
  * Site-aware friendly error — khaas Instagram/TikTok/YouTube "login required" cases.
  * Insta 2025-26 se guests ke liye downloads block karta hai → connect kiye bina fail par
- * user ko clear wajah + hal batao (Nazim ka requirement).
+ * user ko clear wajah + hal batao (product requirement).
  */
 fun smartError(context: Context, link: String, raw: String?): String {
+    val site = loginWallSite(context, link, raw)
+    if (site != null) {
+        return "$site now blocks guest downloads (their new policy). Connect $site once — Settings → Connected accounts — then retry. Your password never touches this app."
+    }
+    return friendlyError(raw)
+}
+
+/**
+ * Ye nakami "login chahiye" wali deewar hai? Site ka naam, warna null.
+ *
+ * ⚠️ EK JAGAH, DO ISTEMAL: user ko dikhne wala message (`smartError`) aur worker ka faisla ke
+ * dobara koshish karni bhi chahiye ya nahi. Aisi nakami **kabhi** retry se theek nahi hoti —
+ * pehle app paanch dafa koshish karti thi (exponential backoff ke sath, yaani kai minute) aur
+ * uske BAAD jaa kar user ko wo jumla dikhta tha jo hum attempt 0 pe hi jaante the.
+ */
+fun loginWallSite(context: Context, link: String, raw: String?): String? {
     val l = link.lowercase()
     val connected = try { connectedSites(context) } catch (e: Exception) { emptyList() }
-    fun need(site: String) =
-        "$site now blocks guest downloads (their new policy). Connect $site once — Settings → Connected accounts — then retry. Your password never touches this app."
     return when {
-        "instagram" in l && !connected.contains("Instagram") -> need("Instagram")
+        "instagram" in l && !connected.contains("Instagram") -> "Instagram"
         "tiktok" in l && !connected.contains("TikTok") &&
-            (raw?.contains("403") == true || raw?.contains("not available", true) == true) -> need("TikTok")
+            (raw?.contains("403") == true || raw?.contains("not available", true) == true) -> "TikTok"
         ("youtube" in l || "youtu.be" in l) && !connected.contains("YouTube") &&
             (raw?.contains("Sign in", true) == true || raw?.contains("age", true) == true ||
-                raw?.contains("bot", true) == true) -> need("YouTube")
-        else -> friendlyError(raw)
+                raw?.contains("bot", true) == true) -> "YouTube"
+        else -> null
     }
 }
 
@@ -599,12 +647,41 @@ fun runDownload(
         req.applyCommon(context)
 
         var maxP = 0
-        YoutubeDL.getInstance().execute(req, processId) { progress, _, _ ->
-            onBeat() // process zinda hai — watchdog timer reset
-            val p = progress.toInt()
-            if (p in 0..100 && p > maxP) {
-                maxP = p
-                onProgress(maxP)
+
+        // ── ROUTE 0 — Instagram ka apna API, seedha (InstagramExtractor) ──────────────────
+        // Pehle is liye ke ye **wahid** rasta hai jo Instagram ki TASVEEREIN utaar sakta hai:
+        // yt-dlp photo post pe file likhne se PEHLE hi "No video formats found" de kar mar
+        // jata hai (device pe naapa, 7-Sep-2026) — is liye neeche wali photo-branch ka mauqa
+        // hi nahi aata tha. Sath me ye ek doosra darwaza bhi hai: jis din yt-dlp ka Instagram
+        // extractor toote, ye chalta rahega.
+        //
+        // Isay aage rakhna mehfooz is liye hai ke iska contract saaf hai: kisi bhi mayoosi pe
+        // 0 lauta deta hai aur `work` khali chhorta hai ⇒ neeche wala engine bilkul waise hi
+        // chal parta hai jaise pehle chalta tha. MP3 iska kaam nahi (ffmpeg chahiye), aur
+        // login na ho to `fetch` bina request kiye null de deta hai.
+        // Gate ke liye extractor ka apna regex — "instagram" string dhoondne se behtar, kyunki
+        // wahi jaanta hai ke wo kaunse link sambhal sakta hai (post/reel/tv shortcode).
+        val route0 = if (audioOnly || InstagramExtractor.shortcodeOf(link) == null) 0 else try {
+            InstagramExtractor.downloadInto(context, link, work, onBeat) { p ->
+                if (p > maxP) { maxP = p; onProgress(maxP) }
+            }
+        } catch (e: Exception) {
+            Log.w("XniperDL", "route0 threw — engine ki bari", e)
+            0
+        }
+
+        if (route0 == 0) {
+            // Route 0 haar maan-ne se pehle adhoori files chhor sakta hai; unhe saaf karo
+            // warna neeche wo asli download samajh kar utha li jayengi.
+            work.listFiles()?.forEach { it.deleteRecursively() }
+            maxP = 0
+            YoutubeDL.getInstance().execute(req, processId) { progress, _, _ ->
+                onBeat() // process zinda hai — watchdog timer reset
+                val p = progress.toInt()
+                if (p in 0..100 && p > maxP) {
+                    maxP = p
+                    onProgress(maxP)
+                }
             }
         }
 
@@ -615,19 +692,69 @@ fun runDownload(
         }.toList()
         val videoExts = setOf("mp4", "mkv", "webm", "mov", "m4v", "ts", "3gp", "avi")
         val audioExts = setOf("mp3", "m4a", "opus", "ogg", "wav", "flac", "aac", "weba")
-        val imageExts = setOf("jpg", "jpeg", "png", "webp")
         val media = all.filter {
             val e = it.extension.lowercase()
-            if (audioOnly) e in audioExts || e in videoExts else e in videoExts
+            when {
+                audioOnly -> e in audioExts || e in videoExts
+                // ⚠️ Route 0 ne jo bhi likha wo POST ka asli media hai — mila-jula carousel
+                // (do video + teen tasveer) me tasveerein "thumbnail" nahi hotin. Bagair is ke
+                // wo neeche wali photo-branch tak bhi nahi pohanchtin (kyunki media khali nahi
+                // hai) aur chup-chaap gir jatin.
+                route0 > 0 -> e in videoExts || isImageExt(e)
+                else -> e in videoExts
+            }
         }
-        val thumbs = all.filter { it.extension.lowercase() in imageExts }
+        val thumbs = all.filter { isImageExt(it.extension) }
+        val platform = platformFolder(link)
+        val custom = Prefs.customLocationUri(context)
+
+        // PHOTO POST — koi video/audio nahi mili magar tasveerein mili hain (Instagram carousel,
+        // TikTok slideshow, Twitter image…). Pehle ye chup-chaap "File not found" ban jata tha:
+        // yt-dlp .jpg utaar leta tha aur hamara filter usay phenk deta tha.
+        // ⚠️ Ye branch SIRF tab chalti hai jab media khali ho — warna ye chalti video ki
+        // thumbnail ko hi "photo post" samajh leti.
+        if (media.isEmpty() && thumbs.isNotEmpty()) {
+            var savedImg = 0
+            var firstDisplayImg = ""
+            for (img in thumbs) {
+                try {
+                    val loc = if (custom.isNotBlank()) {
+                        try {
+                            saveToCustomTree(context, img, platform, Uri.parse(custom), false) { onBeat() }
+                        } catch (e: Exception) {
+                            Log.e("XniperDL", "custom photo save fail → Pictures", e)
+                            saveImageToPictures(context, img, platform) { onBeat() }
+                        }
+                    } else {
+                        saveImageToPictures(context, img, platform) { onBeat() }
+                    }
+                    if (savedImg == 0) {
+                        firstDisplayImg = if (custom.isNotBlank()) {
+                            "Custom folder/XniperBuilds/$platform/${img.name}"
+                        } else "Pictures/XniperBuilds/$platform/${img.name}"
+                    }
+                    // Har tasveer ka apna record — title me ASLI filename, taake
+                    // History ka kindLabel/viewMime extension se "Photo" nikal sake.
+                    if (!Prefs.incognito(context)) {
+                        History.add(context, link, img.name, platform, loc, false)
+                    }
+                    savedImg++
+                } catch (e: Exception) {
+                    Log.e("XniperDL", "photo save fail", e)
+                }
+            }
+            if (savedImg > 0) {
+                onSave(100)
+                return if (savedImg == 1) firstDisplayImg
+                else "$savedImg photos → ${firstDisplayImg.substringBeforeLast('/')}/"
+            }
+        }
+
         if (media.isEmpty()) {
             // Archive ON ho to yt-dlp pehle-se-download ki video skip kar deta → koi file nahi
             if (Prefs.downloadArchive(context)) return "Already downloaded (archive skip)."
             throw Exception("File not found")
         }
-        val platform = platformFolder(link)
-        val custom = Prefs.customLocationUri(context)
         var firstDisplay = ""
         var saved = 0
         for (file in media) {
@@ -644,7 +771,14 @@ fun runDownload(
                     onSave(sp)
                 }
             }
-            val galleryDisplay = "${if (audioOnly) "Music" else "Movies"}/XniperBuilds/$platform/$fname"
+            // ⚠️ Folder ka naam file ki kism se — mila-jule carousel me tasveer Pictures me
+            // jati hai, aur usay "Movies/…" likh kar dikhana user ko galat jagah bhejta hai.
+            val galleryRoot = when {
+                isImageExt(file.extension) -> "Pictures"
+                audioOnly -> "Music"
+                else -> "Movies"
+            }
+            val galleryDisplay = "$galleryRoot/XniperBuilds/$platform/$fname"
             val (location, display) = if (custom.isNotBlank()) {
                 try {
                     saveToCustomTree(context, file, platform, Uri.parse(custom), audioOnly, onCopy) to

@@ -102,13 +102,18 @@
             </intent-filter>
         </activity>
 
+        <!-- ⚠️ `noHistory` JAAN-BOOJH KE HATAYA GAYA HAI. Ye tile ab progress-sheet dikhati
+             hai; noHistory ke sath activity focus khotay hi mar jati aur sheet ghaib ho jati.
+             Uska seedha nateeja: `singleTop` + QuickDownloadActivity.onNewIntent() LAZMI hain —
+             warna doosri share isi zinda instance pe aati hai aur sheet PURANI download
+             dikhati rehti hai (yehi bug Riplox IG me pakda gaya tha). -->
         <activity
             android:name=".QuickDownloadActivity"
             android:exported="true"
+            android:launchMode="singleTop"
             android:label="@string/quick_label"
             android:theme="@style/Theme.XniperDownloader.Transparent"
             android:excludeFromRecents="true"
-            android:noHistory="true"
             android:taskAffinity=""
             android:configChanges="orientation|screenSize|keyboardHidden|screenLayout"
             android:windowSoftInputMode="adjustResize">

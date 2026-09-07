@@ -28,7 +28,9 @@ import com.xniperbuilds.downloader.ui.theme.SpaceGrotesk
 fun OnboardingScreen(modifier: Modifier = Modifier, onDone: () -> Unit) {
     var step by remember { mutableIntStateOf(0) }
     val steps = listOf(
-        Triple("👋", "Welcome to Riplox", "Video & audio from any site — free, no ads, no watermarks."),
+        // ⚠️ "no ads" nahi likhna — app apne hi doosre products ki ek patti dikhati hai. Koi
+        //    ad network aur koi tracker phir bhi nahi; jumla wahi kehta hai jo waqai sach hai.
+        Triple("👋", "Welcome to Riplox", "Video & audio from any site — free, no ad networks, no watermarks."),
         Triple("🔗", "Paste → Download", "Paste a link, tap Download, pick video or audio in the popup. Your choices become the defaults."),
         Triple("⚡", "Even faster: Share", "In any app tap Share → ⚡ Instant Download. Zero taps, runs in the background."),
         Triple("🔒", "Private videos?", "Instagram & others block guests now. Connect the site once — you log in on the REAL site, your password never touches this app.")

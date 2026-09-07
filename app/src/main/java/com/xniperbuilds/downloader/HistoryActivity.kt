@@ -138,7 +138,8 @@ private fun HistoryScreen(modifier: Modifier = Modifier) {
         val chipOk = when (chip) {
             "All" -> true
             "Audio" -> rec.isAudio
-            "Video" -> !rec.isAudio
+            "Photo" -> rec.isImage
+            "Video" -> !rec.isAudio && !rec.isImage
             else -> rec.platform.equals(chip, ignoreCase = true)
         }
         val qOk = query.isBlank() ||
@@ -226,7 +227,7 @@ private fun HistoryScreen(modifier: Modifier = Modifier) {
         Spacer(Modifier.height(8.dp))
 
         Row(modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState())) {
-            listOf("All", "Audio", "Video", "YouTube", "Instagram", "TikTok", "Facebook").forEach { c ->
+            listOf("All", "Audio", "Video", "Photo", "YouTube", "Instagram", "TikTok", "Facebook").forEach { c ->
                 FilterChip(
                     selected = chip == c,
                     onClick = { chip = c },
@@ -475,7 +476,7 @@ private fun RecordRow(
                     overflow = TextOverflow.Ellipsis
                 )
                 Text(
-                    "${if (rec.isAudio) "🎵" else "🎬"} ${rec.platform} • $timeStr",
+                    "${if (rec.isImage) "🖼" else if (rec.isAudio) "🎵" else "🎬"} ${rec.platform} • $timeStr",
                     fontSize = 11.sp,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -530,12 +531,12 @@ private fun RecordRow(
     }
 }
 
-/** Video/audio SHARE — file ke sath Riplox ka intro-text + link bhi jata hai. */
+/** Video/audio/photo SHARE — file ke sath Riplox ka intro-text + link bhi jata hai. */
 private fun shareVideo(context: Context, rec: DownloadRecord) {
     try {
         val uri = Uri.parse(rec.location)
         val i = Intent(Intent.ACTION_SEND).apply {
-            type = if (rec.isAudio) "audio/*" else "video/*"
+            type = rec.viewMime
             putExtra(Intent.EXTRA_STREAM, uri)
             putExtra(
                 Intent.EXTRA_TEXT,
@@ -550,11 +551,9 @@ private fun shareVideo(context: Context, rec: DownloadRecord) {
 }
 
 private fun playFile(context: Context, rec: DownloadRecord) {
-    try {
-        val i = Intent(context, PlayerActivity::class.java).setData(Uri.parse(rec.location))
-        context.startActivity(i)
-    } catch (e: Exception) {
-        Toast.makeText(context, "Can't play (file may have been deleted)", Toast.LENGTH_SHORT).show()
+    // Photo → gallery viewer, video/audio → apna player. Faisla openRecord ke andar hai.
+    if (!openRecord(context, rec)) {
+        Toast.makeText(context, "Can't open (file may have been deleted)", Toast.LENGTH_SHORT).show()
     }
 }
 

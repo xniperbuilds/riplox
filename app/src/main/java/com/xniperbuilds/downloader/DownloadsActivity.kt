@@ -201,20 +201,14 @@ private fun DownloadsScreen(modifier: Modifier = Modifier) {
                     .fillMaxWidth()
                     .padding(vertical = 4.dp)
                     .clickable {
-                        // tap = play
-                        try {
-                            context.startActivity(
-                                android.content.Intent(context, PlayerActivity::class.java)
-                                    .setData(android.net.Uri.parse(r.location))
-                            )
-                        } catch (e: Exception) {
-                        }
+                        // tap = kholo (photo → gallery viewer, warna apna player)
+                        openRecord(context, r)
                     }
             ) {
                 Column(modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp)) {
                     Text(r.title, fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
                     Text(
-                        "${if (r.isAudio) "🎵" else "🎬"} ${r.platform} · $timeStr · tap to play",
+                        "${if (r.isImage) "🖼" else if (r.isAudio) "🎵" else "🎬"} ${r.platform} · $timeStr · tap to open",
                         fontSize = 11.sp,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )

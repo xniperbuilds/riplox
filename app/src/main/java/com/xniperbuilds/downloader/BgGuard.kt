@@ -12,7 +12,7 @@ import android.provider.Settings
 /**
  * Background-download guard — Infinix/Tecno (XOS "Hiber") jaise phones app process ko
  * background jaate hi FREEZE kar dete hain, foreground-service ke BAWAJOOD. Isi se
- * Nazim ke 3 masle aaye the: share → download start nahi hota, app kholo to start,
+ * User ke 3 masle aaye the: share → download start nahi hota, app kholo to start,
  * app band karo to pause. Ilaj = 3-cheez setup (user ek dafa karta hai):
  *   1. Battery optimization exemption (system dialog)
  *   2. Auto-start permission (OEM security app me)
@@ -52,7 +52,7 @@ object BgGuard {
     }
 
     /** OEM auto-start / startup-manager screens — jo pehla mile khol do.
-     * Transsion (Infinix XOS / Tecno HiOS / itel) sab se pehle — Nazim ka test phone.
+     * Transsion (Infinix XOS / Tecno HiOS / itel) sab se pehle — hamara test phone.
      * App public hai is liye baqi bade OEMs bhi cover (Xiaomi/Oppo/Vivo/OnePlus/Huawei). */
     private val AUTO_START_SCREENS = listOf(
         ComponentName("com.transsion.phonemaster", "com.cyin.himgr.autostart.AutoStartActivity"),

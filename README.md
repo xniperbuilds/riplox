@@ -6,7 +6,7 @@
 
 **Rip anything. Keep everything.**
 
-Free & open-source video / audio downloader for Android — 1000+ sites, up to 4K, MP3, no ads, no watermarks.
+Free & open-source video / audio downloader for Android — 1000+ sites, up to 4K, MP3, no third-party ads, no watermarks.
 
 [![Release](https://img.shields.io/github/v/release/xniperbuilds/riplox?label=Download&color=3E4E68)](https://github.com/xniperbuilds/riplox/releases/latest)
 [![Downloads](https://img.shields.io/github/downloads/xniperbuilds/riplox/total?color=3E4E68)](https://github.com/xniperbuilds/riplox/releases)
@@ -38,7 +38,7 @@ Free & open-source video / audio downloader for Android — 1000+ sites, up to 4
 - 🔒 **Secret Vault** — fingerprint/PIN-locked hidden storage; vault files disappear from gallery, history and backups
 - 📜 **History & Trash** — search, filter, multi-select, link export/import (optionally password-protected file)
 - 🎨 **Clean dark UI** — AMOLED black, Material 3, no clutter
-- 🚫 **No ads. No tracking. No analytics.** Nothing leaves your phone.
+- 🚫 **No ad networks. No tracking. No analytics.** The only promotion you'll see is a strip for our own apps.
 
 ## Install
 
@@ -61,7 +61,7 @@ Sites now block guest downloads. Open Settings → Connected accounts → tap th
 Gallery (`Movies/XniperBuilds/<site>`, audio in `Music/…`) — or any folder/SD card you pick in Settings → Files.
 
 **Is it safe?**
-Open source — read the code. No ads SDK, no analytics, no network calls except the download itself. Logins happen on the official site inside a WebView; only the resulting cookies are stored, on your phone, and you can delete them anytime.
+Open source — read the code. No ad SDK, no analytics, no account. Besides the download itself the app makes exactly two other calls, both to the site in question: a once-a-day check on GitHub for a newer Riplox, and — on Instagram links, and only when you are logged in — a direct call to Instagram so photo posts work at all. Logins happen on the official site inside a WebView; only the resulting cookies are stored, on your phone, and you can delete them anytime.
 
 **Video won't download?**
 Update the engine (Settings → About → Update engine), try again, or use Exact format in the download popup.

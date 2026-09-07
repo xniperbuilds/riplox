@@ -34,7 +34,6 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.FileProvider
 import com.xniperbuilds.downloader.ui.theme.XniperDownloaderTheme
-import com.yausername.youtubedl_android.YoutubeDL
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -76,7 +75,10 @@ private fun AboutScreen(modifier: Modifier = Modifier) {
         Text("v$version · by XniperBuilds", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
         Spacer(Modifier.height(8.dp))
         Text(
-            "Video & audio downloader — free, no ads.",
+            // ⚠️ "no ads" ab poora sach nahi hota: app apne hi doosre products ki ek patti
+            //    dikhati hai. Koi third-party ad network, koi tracker phir bhi nahi hai —
+            //    jumla wahi kehta hai jo waqai sach hai.
+            "Video & audio downloader — free, no third-party ads, no tracking.",
             fontSize = 13.sp,
             textAlign = TextAlign.Center,
             color = MaterialTheme.colorScheme.onSurfaceVariant
@@ -84,7 +86,9 @@ private fun AboutScreen(modifier: Modifier = Modifier) {
         Spacer(Modifier.height(24.dp))
 
         var updating by remember { mutableStateOf(false) }
-        var updateMsg by remember { mutableStateOf("") }
+        // Khali nahi — jab tak user kuch dabaye nahi, wo aakhri check ka SACH dekhta hai
+        // (version + kab + kya hua). Pehle yahan kuch bhi nahi likha hota tha.
+        var updateMsg by remember { mutableStateOf(Engine.statusLine(context)) }
         val scope = rememberCoroutineScope()
         OutlinedButton(
             onClick = {
@@ -96,14 +100,13 @@ private fun AboutScreen(modifier: Modifier = Modifier) {
                 updating = true
                 updateMsg = "Updating… (~10 MB)"
                 scope.launch {
-                    updateMsg = try {
-                        withContext(Dispatchers.IO) {
-                            YoutubeDL.getInstance().updateYoutubeDL(context, YoutubeDL.UpdateChannel.STABLE)
-                        }
-                        val v = withContext(Dispatchers.IO) { YoutubeDL.getInstance().version(context) }
-                        "✓ Engine updated ($v)"
-                    } catch (e: Exception) {
-                        "Update failed — check internet."
+                    // ⚠️ Nateeja ab Engine deta hai. Purana code sirf exception pakadta tha,
+                    // is liye "✓ Engine updated" us call pe bhi likh deta tha jo asal me
+                    // kuch bhi na badalti — user ko kabhi pata hi nahi chalta tha.
+                    updateMsg = when (Engine.update(context)) {
+                        Engine.Outcome.UPDATED -> "✓ Engine updated (${Prefs.engineVersion(context)})"
+                        Engine.Outcome.ALREADY_LATEST -> "✓ Already the latest (${Prefs.engineVersion(context)})"
+                        Engine.Outcome.FAILED -> "Update failed — check internet, then try again."
                     }
                     updating = false
                 }

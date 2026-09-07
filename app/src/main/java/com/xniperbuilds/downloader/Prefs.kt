@@ -41,6 +41,33 @@ object Prefs {
     fun lastUpdateDay(c: Context): String = sp(c).getString("lastUpdateDay", "") ?: ""
     fun setLastUpdateDay(c: Context, v: String) = sp(c).edit().putString("lastUpdateDay", v).apply()
 
+    /** Aakhri engine-update ka NATEEJA + version — pehle ye kahin record hi nahi hota tha,
+     * is liye har dafa fail hone wala update bilkul kamyab jaisa dikhta tha (Engine.kt). */
+    fun engineOutcome(c: Context): String = sp(c).getString("engineOutcome", "") ?: ""
+    fun engineVersion(c: Context): String = sp(c).getString("engineVersion", "") ?: ""
+    fun setEngineResult(c: Context, outcome: String, version: String) =
+        sp(c).edit().putString("engineOutcome", outcome).putString("engineVersion", version).apply()
+
+    /** Worker ka self-heal (engine update + ek retry) kis din chala — din me ek dafa.
+     * Bagair is ke: 5 retries × kai downloads = baar baar ~10MB binary, mobile data pe. */
+    fun lastSelfHealDay(c: Context): String = sp(c).getString("lastSelfHealDay", "") ?: ""
+    fun setLastSelfHealDay(c: Context, v: String) = sp(c).edit().putString("lastSelfHealDay", v).apply()
+
+    /** GitHub pe nayi app-version ka aakhri check (yyyyMMdd) + jo version mila. */
+    fun lastAppCheckDay(c: Context): String = sp(c).getString("lastAppCheckDay", "") ?: ""
+    fun setLastAppCheckDay(c: Context, v: String) = sp(c).edit().putString("lastAppCheckDay", v).apply()
+    fun latestAppVersion(c: Context): String = sp(c).getString("latestAppVersion", "") ?: ""
+    fun setLatestAppVersion(c: Context, v: String) = sp(c).edit().putString("latestAppVersion", v).apply()
+    /** User ne kis version ka update-banner "baad me" kar diya. */
+    fun dismissedAppVersion(c: Context): String = sp(c).getString("dismissedAppVersion", "") ?: ""
+    fun setDismissedAppVersion(c: Context, v: String) = sp(c).edit().putString("dismissedAppVersion", v).apply()
+
+    /** Instagram ka login expire ho gaya (Route 0 ko login page pe bheja gaya).
+     * User ko batane ke liye — warna wo samajhta hai app toot gayi, jabki dobara
+     * connect karna hai. */
+    fun sessionExpired(c: Context) = sp(c).getBoolean("igSessionExpired", false)
+    fun setSessionExpired(c: Context, v: Boolean) = sp(c).edit().putBoolean("igSessionExpired", v).apply()
+
     /** Battery-optimization exemption ek dafa pucha ya nahi. */
     fun askedBattery(c: Context) = sp(c).getBoolean("askedBattery", false)
     fun setAskedBattery(c: Context, v: Boolean) = sp(c).edit().putBoolean("askedBattery", v).apply()
@@ -64,7 +91,7 @@ object Prefs {
     }
     fun setBackgroundMode(c: Context, v: Boolean) = sp(c).edit().putBoolean("backgroundMode", v).apply()
 
-    /** Failed download kitni total attempts (1–5, default 5 = max — Nazim 2026-07-09). */
+    /** Failed download kitni total attempts (1–5, default 5 = max — faisla 2026-07-09). */
     fun maxRetries(c: Context) = sp(c).getInt("maxRetries", 5).coerceIn(1, 5)
     fun setMaxRetries(c: Context, v: Int) = sp(c).edit().putInt("maxRetries", v.coerceIn(1, 5)).apply()
 
@@ -83,7 +110,7 @@ object Prefs {
                 .putBoolean("v3Defaults", true)
                 .apply()
         }
-        // 2026-07-09 (Nazim): performance defaults PURANE installs pe bhi ek dafa inject —
+        // 2026-07-09: performance defaults PURANE installs pe bhi ek dafa inject —
         // 1080p quality + retry max (5) + parallel downloads max (5). User baad me
         // Settings se badle to dobara overwrite NAHI hota (flag ek hi dafa chalta).
         if (!s.getBoolean("perfDefaults", false)) {
@@ -108,7 +135,7 @@ object Prefs {
     fun setHideBgWarning(c: Context, v: Boolean) = sp(c).edit().putBoolean("hideBgWarning", v).apply()
 
     /** Video quality: "best" | "2160" | "1080" | "720" | "480" | "360". Default 1080p
-     *  (Nazim 2026-07-09 — "best" kabhi 4K utha leta = slow + bhari files). */
+     *  (faisla 2026-07-09 — "best" kabhi 4K utha leta = slow + bhari files). */
     fun quality(c: Context): String = sp(c).getString("quality", "1080") ?: "1080"
     fun setQuality(c: Context, v: String) = sp(c).edit().putString("quality", v).apply()
 
@@ -228,7 +255,7 @@ object Prefs {
     fun customLocationUri(c: Context): String = sp(c).getString("customLocationUri", "") ?: ""
     fun setCustomLocationUri(c: Context, v: String) = sp(c).edit().putString("customLocationUri", v).apply()
 
-    /** Ek waqt me kitni background downloads chalein (1–5). Default 5 = max (Nazim 2026-07-09). */
+    /** Ek waqt me kitni background downloads chalein (1–5). Default 5 = max (faisla 2026-07-09). */
     fun simultaneous(c: Context): Int = sp(c).getInt("simultaneous", 5)
     fun setSimultaneous(c: Context, v: Int) = sp(c).edit().putInt("simultaneous", v).apply()
 

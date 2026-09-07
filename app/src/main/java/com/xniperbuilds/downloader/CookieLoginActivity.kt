@@ -58,7 +58,7 @@ class CookieLoginActivity : ComponentActivity() {
         val label = intent.getStringExtra("label") ?: "YouTube"
 
         // TikTok ka desktop login-modal PORTRAIT me blank rehta hai, LANDSCAPE me poora
-        // dikhta hai (Nazim ne khud discover kiya) → TikTok login seedha landscape me kholo
+        // dikhta hai (device pe khud dekha gaya) → TikTok login seedha landscape me kholo
         if (site == "tiktok") {
             requestedOrientation = android.content.pm.ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
         }
@@ -105,7 +105,7 @@ class CookieLoginActivity : ComponentActivity() {
                             Spacer(Modifier.width(6.dp))
                             Button(onClick = {
                                 // Snapshot pehle — login-cookie na mili to file WAPAS (guest
-                                // cookies se "connected ✓" dikhna WRONG tha, Nazim ka bug-report)
+                                // cookies se "connected ✓" dikhna WRONG tha, bug-report se)
                                 val before = try {
                                     if (hasCookies(context)) cookiesFile(context).readText() else null
                                 } catch (e: Exception) { null }

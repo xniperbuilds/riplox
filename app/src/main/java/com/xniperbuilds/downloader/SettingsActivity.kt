@@ -53,6 +53,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.foundation.layout.size
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -64,6 +65,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.xniperbuilds.downloader.ui.theme.XniperDownloaderTheme
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 class SettingsActivity : ComponentActivity() {
@@ -222,7 +224,7 @@ private fun DownloadsPage() {
     var showBgSetup by remember { mutableStateOf(false) }
 
     // Background-setup ka PERMANENT raasta — Home banner "Done" ke baad dobara nahi
-    // dikhta (Nazim 2026-07-16: "card nahi dikh raha"), yahan hamesha milega.
+    // dikhta (bug-report 2026-07-16: "card nahi dikh raha"), yahan hamesha milega.
     OutlinedButton(onClick = { showBgSetup = true }, modifier = Modifier.fillMaxWidth()) {
         Text("🛡 Fix background downloads")
     }
@@ -235,6 +237,36 @@ private fun DownloadsPage() {
     if (showBgSetup) {
         BgSetupDialog { showBgSetup = false }
     }
+
+    // ENGINE — download ka asal engine (yt-dlp) roz khud ko update karta hai, magar us ka
+    // haal kahin dikhta nahi tha. Jab koi site "kaam karna band" kar de to sabse pehle
+    // yehi dekhna hota hai, aur ghair-technical user ke liye ye ek-tap wala jawab hai.
+    var engineBusy by remember { mutableStateOf(false) }
+    var engineMsg by remember { mutableStateOf(Engine.statusLine(context)) }
+    val engineScope = rememberCoroutineScope()
+    OutlinedButton(
+        onClick = {
+            if (engineBusy) return@OutlinedButton
+            if (DownloadQueue.hasActive(context)) {
+                engineMsg = "A download is running — update after it finishes."
+                return@OutlinedButton
+            }
+            engineBusy = true
+            engineMsg = "Updating… (~10 MB)"
+            engineScope.launch {
+                engineMsg = when (Engine.update(context)) {
+                    Engine.Outcome.UPDATED -> "✓ Engine updated (${Prefs.engineVersion(context)})"
+                    Engine.Outcome.ALREADY_LATEST -> "✓ Already the latest (${Prefs.engineVersion(context)})"
+                    Engine.Outcome.FAILED -> "Update failed — check internet, then try again."
+                }
+                engineBusy = false
+            }
+        },
+        enabled = !engineBusy,
+        modifier = Modifier.fillMaxWidth()
+    ) { Text(if (engineBusy) "Updating…" else "⚙ Update download engine") }
+    Text(engineMsg, fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+    Spacer(Modifier.height(10.dp))
 
     // Note: video/audio, quality, subs, playlist — download popup me choose hote hi SAVE
     // ho jate hain (wahi defaults ban jate hain). Isliye yahan extra toggles nahi.

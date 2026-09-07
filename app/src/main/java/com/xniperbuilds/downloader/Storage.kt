@@ -89,19 +89,20 @@ fun saveAudioToMusic(context: Context, temp: File, platform: String, onCopy: (Lo
     mimeForExt(temp.extension, audioOnly = true), "${Environment.DIRECTORY_MUSIC}/XniperBuilds/$platform", onCopy
 )
 
-/** Thumbnail ko Pictures/XniperBuilds/<platform>/ me save karo. */
-fun saveImageToPictures(context: Context, temp: File, platform: String): String {
+/** Jo extensions tasveer hain — thumbnail bhi, aur photo-post ki asli file bhi. */
+val IMAGE_EXTS = setOf("jpg", "jpeg", "png", "webp", "gif", "heic", "heif", "bmp")
+
+fun isImageExt(ext: String): Boolean = ext.lowercase() in IMAGE_EXTS
+
+/** Tasveer ko Pictures/XniperBuilds/<platform>/ me save karo (thumbnail bhi, photo post bhi). */
+fun saveImageToPictures(context: Context, temp: File, platform: String, onCopy: (Long) -> Unit = {}): String {
     if (Build.VERSION.SDK_INT < 29) {
-        return saveLegacyPublic(context, temp, platform, Environment.DIRECTORY_PICTURES)
-    }
-    val mime = when (temp.extension.lowercase()) {
-        "png" -> "image/png"
-        "webp" -> "image/webp"
-        else -> "image/jpeg"
+        return saveLegacyPublic(context, temp, platform, Environment.DIRECTORY_PICTURES, onCopy)
     }
     return insertMedia(
-        context, MediaStore.Images.Media.EXTERNAL_CONTENT_URI, temp, mime,
-        "${Environment.DIRECTORY_PICTURES}/XniperBuilds/$platform"
+        context, MediaStore.Images.Media.EXTERNAL_CONTENT_URI, temp,
+        mimeForExt(temp.extension, audioOnly = false),
+        "${Environment.DIRECTORY_PICTURES}/XniperBuilds/$platform", onCopy
     )
 }
 
@@ -111,7 +112,13 @@ fun saveImageToPictures(context: Context, temp: File, platform: String): String 
  * (WRITE permission na ho to app ke apne external folder me — file phir bhi bachti hai).
  */
 fun savePublic(context: Context, temp: File, platform: String, audioOnly: Boolean, onCopy: (Long) -> Unit = {}): String =
-    if (Build.VERSION.SDK_INT >= 29) {
+    // ⚠️ EXTENSION pehle, `audioOnly` baad me. Photo post (Insta carousel / TT slideshow /
+    // Twitter image) ki .jpg audioOnly=false ke sath aati hai — bina is check ke wo
+    // MediaStore.VIDEO me `video/mp4` mime ke sath jati thi: gallery me toota hua entry,
+    // Movies/ me pari hui tasveer, aur History me "video" jo tap pe player me nahi khulti.
+    if (isImageExt(temp.extension)) {
+        saveImageToPictures(context, temp, platform, onCopy)
+    } else if (Build.VERSION.SDK_INT >= 29) {
         if (audioOnly) saveAudioToMusic(context, temp, platform, onCopy)
         else saveVideoToGallery(context, temp, platform, onCopy)
     } else {
@@ -171,6 +178,13 @@ fun mimeForExt(ext: String, audioOnly: Boolean): String = when (ext.lowercase())
     "opus", "ogg" -> "audio/ogg"
     "wav" -> "audio/wav"
     "flac" -> "audio/flac"
+    // Tasveerein — ye branches se PEHLE `else` me gir kar "video/mp4" ban jati thin.
+    "jpg", "jpeg" -> "image/jpeg"
+    "png" -> "image/png"
+    "webp" -> "image/webp"
+    "gif" -> "image/gif"
+    "heic", "heif" -> "image/heif"
+    "bmp" -> "image/bmp"
     else -> if (audioOnly) "audio/mpeg" else "video/mp4"
 }
 

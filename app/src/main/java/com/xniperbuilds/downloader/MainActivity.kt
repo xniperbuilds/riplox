@@ -67,7 +67,6 @@ import coil.compose.AsyncImage
 import coil.decode.VideoFrameDecoder
 import com.xniperbuilds.downloader.ui.theme.SpaceGrotesk
 import com.xniperbuilds.downloader.ui.theme.XniperDownloaderTheme
-import com.yausername.youtubedl_android.YoutubeDL
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
@@ -175,39 +174,69 @@ fun HomeScreen(modifier: Modifier = Modifier) {
     }
     var showBgSetup by remember { mutableStateOf(false) }
 
+    // App ki apni version — BuildConfig is project me generate nahi hota (AGP 8 me default
+    // off hai), is liye wahi raasta jo AboutActivity pehle se istemal karti hai.
+    val appVersion = remember {
+        try {
+            context.packageManager.getPackageInfo(context.packageName, 0).versionName ?: ""
+        } catch (e: Exception) {
+            ""
+        }
+    }
+    // GitHub pe is se nayi version pari hai? (khali = kuch nahi dikhana)
+    var newVersion by remember { mutableStateOf(Updates.pendingVersion(context, appVersion)) }
+
     // Download = hamesha Options-popup (wahan video/audio/quality choose + choices save hoti hain)
     fun openDownloadPopup() {
-        val l = url.trim()
-        if (l.isBlank() || !l.startsWith("http")) {
-            Toast.makeText(context, "Paste a link first", Toast.LENGTH_SHORT).show()
-            return
+        // BATCH PASTE — ek se zyada link ek sath. Chat/notes se copy kiya hua text seedha
+        // yahan chipka do; har link apni download ban jata hai.
+        // ⚠️ Kai link ho to Download-Options popup NAHI khulta: wo popup EK download ke
+        // liye hai (quality/playlist/format uske apne). 10 link pe 10 popup lagana rukawat
+        // hai, faida nahi — is liye batch seedha global Settings ke sath queue me jata hai.
+        val links = extractUrls(url)
+        when {
+            links.isEmpty() -> {
+                Toast.makeText(context, "Paste a link first", Toast.LENGTH_SHORT).show()
+                return
+            }
+            links.size == 1 -> {
+                context.startActivity(
+                    Intent(context, ConfigureDownloadActivity::class.java).putExtra("link", links[0])
+                )
+            }
+            else -> {
+                val audio = Prefs.audioMode(context)
+                links.forEach { DownloadQueue.enqueue(context, it, audio) }
+                Toast.makeText(
+                    context,
+                    "${links.size} links queued — progress in Downloads",
+                    Toast.LENGTH_LONG
+                ).show()
+            }
         }
-        context.startActivity(
-            Intent(context, ConfigureDownloadActivity::class.java).putExtra("link", l)
-        )
         url = ""
     }
 
     // Din me ek dafa engine auto-update (app open pe, background me chupchaap).
     // Guard: (a) koi download chal rahi ho to skip — binary mid-download replace na ho;
     // (b) Wi-Fi-only ON + mobile data → skip (user ka data na jale).
+    // ⚠️ Ab ye Engine ke through hai. Purana code seedha updateYoutubeDL() chalata tha aur
+    // uska nateeja `catch (_: Exception) {}` me nigal jata tha — har dafa fail hone wala
+    // update bilkul kamyab jaisa lagta tha, aur kahin record bhi nahi hota tha.
+    // Doosra check DownloadWorker me hai — share-sheet wale user ke liye (wo yahan aata hi nahi).
     LaunchedEffect(Unit) {
-        val today = java.text.SimpleDateFormat("yyyyMMdd", java.util.Locale.US)
-            .format(java.util.Date())
-        if (Prefs.lastUpdateDay(context) != today) {
-            try {
-                val skip = withContext(Dispatchers.IO) {
-                    DownloadQueue.hasActive(context) ||
-                        (Prefs.wifiOnly(context) && isMetered(context))
-                }
-                if (!skip) {
-                    withContext(Dispatchers.IO) {
-                        YoutubeDL.getInstance().updateYoutubeDL(context, YoutubeDL.UpdateChannel.STABLE)
-                    }
-                    Prefs.setLastUpdateDay(context, today)
-                }
-            } catch (_: Exception) {
-            }
+        try {
+            Engine.dailyIfDue(context)
+        } catch (_: Exception) {
+        }
+    }
+
+    // Din me ek dafa GitHub se poochho ke nayi app-version to nahi aa gayi.
+    LaunchedEffect(Unit) {
+        try {
+            Updates.checkDaily(context)
+            newVersion = Updates.pendingVersion(context, appVersion)
+        } catch (_: Exception) {
         }
     }
 
@@ -388,18 +417,71 @@ fun HomeScreen(modifier: Modifier = Modifier) {
             }
         }
 
+        // NAYI APP-VERSION — Play ka in-app-update yahan chal hi nahi sakta (app Play pe nahi
+        // hai), aur engine khud ko update kar leta hai magar app khud ko nahi. Bagair is ke
+        // v1.0.0 wala user aaj tak v1.0.0 hi chala raha hota hai.
+        // ⚠️ Ye khud kuch install nahi karta — sirf Releases ka safha kholta hai.
+        if (newVersion.isNotBlank()) {
+            Card(modifier = Modifier.fillMaxWidth()) {
+                Column(modifier = Modifier.padding(14.dp)) {
+                    Text(
+                        "⬆️ Riplox $newVersion is out",
+                        fontSize = 14.sp,
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                    Text(
+                        "You're on $appVersion. Tap Download, then open the file to install — your downloads, history and logins stay.",
+                        fontSize = 12.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Spacer(Modifier.height(8.dp))
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Button(
+                            onClick = {
+                                // ⚠️ Seedha APK, releases ka safha NAHI — wahan ghair-technical
+                                // user "Source code (zip)" pe tap kar deta hai. Ye link browser
+                                // me foran download shuru kar deta hai.
+                                try {
+                                    context.startActivity(
+                                        Intent(Intent.ACTION_VIEW, Uri.parse(Updates.DOWNLOAD_URL))
+                                    )
+                                } catch (_: Exception) {
+                                }
+                            },
+                            modifier = Modifier.weight(1f)
+                        ) { Text("Download") }
+                        OutlinedButton(
+                            onClick = {
+                                Prefs.setDismissedAppVersion(context, newVersion)
+                                newVersion = ""
+                            },
+                            modifier = Modifier.weight(1f)
+                        ) { Text("Later") }
+                    }
+                }
+            }
+            Spacer(Modifier.height(12.dp))
+        }
+
         // History / About / Update engine → moved to the bottom utility area (branded layout)
 
+        // ⚠️ singleLine = false: batch paste ka poora point yehi hai — kai link chipkane
+        // par user ko dikhna chahiye ke usne kya chipkaya. Ek line me wo sirf ek lambi
+        // patti dekhta hai aur samajhta hai ke kuch ghalat ho gaya.
+        val pastedCount = remember(url) { extractUrls(url).size }
         OutlinedTextField(
             value = url,
             onValueChange = { url = it },
-            label = { Text("Paste a link") },
-            singleLine = true,
+            label = { Text(if (pastedCount > 1) "$pastedCount links" else "Paste a link") },
+            singleLine = false,
+            maxLines = 4,
             modifier = Modifier.fillMaxWidth()
         )
         Spacer(Modifier.height(14.dp))
 
-        GradientButton(text = "Download") { openDownloadPopup() }
+        GradientButton(
+            text = if (pastedCount > 1) "Download $pastedCount links" else "Download"
+        ) { openDownloadPopup() }
 
         Spacer(Modifier.height(26.dp))
 
@@ -432,14 +514,9 @@ fun HomeScreen(modifier: Modifier = Modifier) {
                         .fillMaxWidth()
                         .clip(RoundedCornerShape(12.dp))
                         .clickable {
-                            // Tap = seedha PLAY (History nahi)
-                            try {
-                                context.startActivity(
-                                    Intent(context, PlayerActivity::class.java)
-                                        .setData(Uri.parse(r.location))
-                                )
-                            } catch (e: Exception) {
-                                Toast.makeText(context, "Can't play (file deleted?)", Toast.LENGTH_SHORT).show()
+                            // Tap = seedha kholo (History nahi). Photo → gallery viewer.
+                            if (!openRecord(context, r)) {
+                                Toast.makeText(context, "Can't open (file deleted?)", Toast.LENGTH_SHORT).show()
                             }
                         }
                         .padding(vertical = 6.dp),
@@ -454,6 +531,14 @@ fun HomeScreen(modifier: Modifier = Modifier) {
                     ) {
                         if (r.isAudio) {
                             Text("🎵", fontSize = 17.sp)
+                        } else if (r.isImage) {
+                            // Tasveer ka apna preview — frameLoader video-frame extractor hai,
+                            // photo pe wo khali box deta tha.
+                            AsyncImage(
+                                model = r.location,
+                                contentDescription = null,
+                                modifier = Modifier.fillMaxSize()
+                            )
                         } else {
                             // Asli video ka frame-thumbnail (saved file se)
                             AsyncImage(
@@ -468,7 +553,7 @@ fun HomeScreen(modifier: Modifier = Modifier) {
                     Column(modifier = Modifier.weight(1f)) {
                         Text(r.title, fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
                         Text(
-                            "${r.platform} · ${if (r.isAudio) "Audio" else "Video"}",
+                            "${r.platform} · ${r.kindLabel}",
                             fontSize = 11.sp,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
@@ -507,7 +592,12 @@ fun HomeScreen(modifier: Modifier = Modifier) {
             }
         }
 
-        Spacer(Modifier.height(16.dp))
+        // ---- Banner ----
+        // ⚠️ Sabse neeche, scroll ke aakhir me — Download field aur Connect buttons se dur.
+        // Patti kabhi kisi tap-target ke pehlu me nahi honi chahiye (galti se tap = us
+        // banner ki maut, chahe wo hamara apna ho).
+        Spacer(Modifier.height(24.dp))
+        PromoBanner()
 
         Spacer(Modifier.height(28.dp))
     }

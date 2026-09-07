@@ -1,6 +1,8 @@
 package com.xniperbuilds.downloader
 
 import android.content.Context
+import android.content.Intent
+import android.net.Uri
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
@@ -17,6 +19,65 @@ data class DownloadRecord(
     val time: Long,
     val trashedAt: Long = 0
 )
+
+/**
+ * Ek record ki KISM — saved file ki extension se.
+ *
+ * ⚠️ Extension `title` se nikalti hai, `location` se NAHI: location MediaStore ka `content://`
+ * uri hai aur usme extension hoti hi nahi. `title` saved filename hai, wahi sach hai.
+ *
+ * Kyun zaroori: record me sirf `isAudio` tha (us waqt app sirf video ya MP3 kar sakti thi).
+ * Photo post aate hi poore app ka `if (isAudio) … else "video"` JHOOT ban gaya — aur sirf
+ * label nahi: tap karne pe tasveer ko VIDEO mime samajh kar player me kholi jati thi.
+ *
+ * ⚠️ Is comment me mime type kabhi as-is mat likhna (slash ke baad star) — Kotlin ke block
+ * comments NESTED hote hain, wo ek naya comment khol deta hai aur poori file kha jata hai.
+ */
+private fun DownloadRecord.ext(): String = title.substringAfterLast('.', "").lowercase()
+
+val DownloadRecord.isImage: Boolean get() = ext() in IMAGE_EXTS
+
+/** UI me dikhane wala lafz. */
+val DownloadRecord.kindLabel: String
+    get() = when {
+        isImage -> "Photo"
+        isAudio -> "Audio"
+        else -> "Video"
+    }
+
+/** ACTION_VIEW / ACTION_SEND ke liye sahi mime. */
+val DownloadRecord.viewMime: String
+    get() = when {
+        isImage -> "image/*"
+        isAudio -> "audio/*"
+        else -> "video/*"
+    }
+
+/**
+ * Ek record kholne ka INTENT — EK jagah, saare call-sites ke liye
+ * (Home ka recent row, History, Downloads, aur done-notification ka tap).
+ *
+ * ⚠️ PlayerActivity tasveer render nahi karti — wo video player hai. Photo record ko
+ * system ke gallery viewer pe bhejna lazmi hai, warna tap pe khali/kala player khulta hai.
+ */
+fun viewIntentFor(context: Context, rec: DownloadRecord): Intent {
+    val uri = Uri.parse(rec.location)
+    return if (rec.isImage) {
+        Intent(Intent.ACTION_VIEW)
+            .setDataAndType(uri, rec.viewMime)
+            .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+    } else {
+        Intent(context, PlayerActivity::class.java).setData(uri)
+    }
+}
+
+/** Record kholo; false = na khul saki (file delete ho gayi / koi viewer nahi). */
+fun openRecord(context: Context, rec: DownloadRecord): Boolean = try {
+    context.startActivity(viewIntentFor(context, rec))
+    true
+} catch (e: Exception) {
+    false
+}
 
 /** Download history + trash — simple JSON files me (app internal storage). */
 object History {
