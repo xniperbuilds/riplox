@@ -66,14 +66,6 @@ fun getPreview(context: Context, link: String): Preview {
     return Preview(info.title ?: "—", info.uploader ?: "—", info.thumbnail, dur)
 }
 
-/** Codec preference → yt-dlp --format-sort value (soft-prefer; agar wo codec na ho to fallback). */
-fun codecSort(codec: String): String? = when (codec) {
-    "h264" -> "vcodec:h264"
-    "vp9" -> "vcodec:vp9"
-    "av1" -> "vcodec:av01"
-    else -> null
-}
-
 // ============================================================================
 // FORMAT PICKER — download se pehle available formats (resolution/size/codec)
 // dikhane ke liye. yt-dlp ke -J (dump-json) se parse — library model getters pe
@@ -148,14 +140,67 @@ fun fetchFormats(context: Context, link: String): List<FormatOption> {
     return out.sortedWith(compareByDescending<FormatOption> { it.height }.thenByDescending { it.filesize })
 }
 
-/** Quality choice → yt-dlp format string (max height cap, merged best video+audio). */
-fun formatFor(quality: String): String = when (quality) {
-    "2160" -> "bestvideo[height<=2160]+bestaudio/best[height<=2160]/best"
-    "1080" -> "bestvideo[height<=1080]+bestaudio/best[height<=1080]/best"
-    "720" -> "bestvideo[height<=720]+bestaudio/best[height<=720]/best"
-    "480" -> "bestvideo[height<=480]+bestaudio/best[height<=480]/best"
-    "360" -> "bestvideo[height<=360]+bestaudio/best[height<=360]/best"
-    else -> "best"
+// The video selector. It no longer filters on size at all — the size the user tapped
+// is carried in the SORT instead, by videoSort below. Everything here does is take
+// the best video and the best audio and let them be merged.
+//
+// The old selector read "bestvideo[height<=N]+bestaudio/best[height<=N]/best", and a
+// download that matched none of the first two branches landed on plain "best", which
+// means the best stream that ALREADY carries video and audio in one file — itag 18 on
+// YouTube, 640x360. That fall-through was reached constantly:
+//
+//   * "best" and anything else non-numeric went straight there.
+//   * bestvideo matches video-ONLY streams, so a site publishing nothing but streams
+//     that already carry sound matched none of them.
+//   * a hard [height<=N] matches nothing where a site states no size at all, which is
+//     most of Instagram, Facebook and X.
+//   * a vertical video is TALLER than the number on the chip by definition, so
+//     [height<=1080] rejected every format of an ordinary 1080-wide clip.
+const val VIDEO_FORMAT = "bv*+ba/b"
+
+// Sort order for yt-dlp's -S. ALWAYS sent, "Any" codec included — leaving it off is
+// what let the engine pick a 1080p stream carrying a third of the picture.
+//
+// Every field is placed on purpose, and each position was measured against real
+// YouTube on both a landscape and a vertical video rather than reasoned about:
+//
+//   res:N FIRST  — this is the size cap, and it belongs here rather than in a filter
+//                  because the engine's "res" is the SMALLEST dimension of a format,
+//                  which is exactly what a person means by "1080p" whichever way up
+//                  the video is: 1920x1080 landscape and 1080x1920 vertical both read
+//                  as 1080. Filtering on height instead gave a vertical clip a
+//                  608x1080 stream — a 1080-TALL format that is barely 600 wide — and
+//                  filtering on width would do the same damage to landscape. Measured:
+//                  the filter gave 608x1080 at 878k where this gives 1080x1920 at
+//                  2055k, same video, same chip. Nothing may rank above it, either:
+//                  fields passed in outrank the engine's own defaults, so a bare
+//                  codec preference would let the codec beat the size, leaving 4K on
+//                  the shelf while 1080p came down. Without a number ("Best") it is
+//                  plain res, which simply takes the largest there is.
+//   proto        — YouTube also publishes a fragmented copy at a fatter bitrate
+//                  (format 96, 4688k against 3038k). It downloads slower and the
+//                  progress bar crawls on it, so a direct stream wins regardless.
+//   vcodec       — a TIE-BREAK, never a filter. Default h264: the one codec every
+//                  Android phone decodes in hardware. Left to its own defaults the
+//                  engine prefers AV1, and YouTube's AV1 1080p runs about 1.1 Mbps
+//                  against 3.0 Mbps for the same frame in h264 — the same chip, a
+//                  third of the data — while on 4K it reaches for 10-bit HDR, which
+//                  on an ordinary phone screen looks washed out and grey. Because the
+//                  size sorts above it, asking for h264 can never cost a resolution:
+//                  4K exists only as VP9 or AV1 and is still picked.
+//   acodec aac   — opus inside an mp4 is unusual, and several Android players hand
+//                  back a video with no sound at all.
+//   br LAST      — same size, same codec: take the fatter stream.
+fun videoSort(codec: String, quality: String): String {
+    val v = when (codec) {
+        "vp9" -> "vp9"
+        "av1" -> "av01"
+        else -> "h264"   // "any" bhi yahi — phone pe hardware decode pakka
+    }
+    // Anything that is not a number is a name like "Best", and asks for no cap. A chip
+    // added later without this guard would build "res:best" and break every download.
+    val res = if (quality.toIntOrNull() == null) "res" else "res:$quality"
+    return "$res,proto,vcodec:$v,acodec:aac,br"
 }
 
 // ============================================================================
@@ -614,8 +659,13 @@ fun runDownload(
             if (formatOverride != null) {
                 req.addOption("-f", formatOverride)
             } else {
-                req.addOption("-f", formatFor(qualityOverride ?: Prefs.quality(context)))
-                codecSort(Prefs.videoCodec(context))?.let { req.addOption("-S", it) }
+                // The size the user tapped rides in the SORT, not in a filter — see
+                // videoSort for why, and for why each field sits where it does.
+                req.addOption("-f", VIDEO_FORMAT)
+                req.addOption(
+                    "-S",
+                    videoSort(Prefs.videoCodec(context), qualityOverride ?: Prefs.quality(context))
+                )
             }
             req.addOption("--merge-output-format", Prefs.videoContainer(context))
             req.addOption("--embed-metadata")

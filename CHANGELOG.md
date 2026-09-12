@@ -3,6 +3,18 @@
 All notable changes to Riplox are documented here.
 Versioning: **MAJOR.MINOR.PATCH** — new features bump MINOR, fixes bump PATCH.
 
+## [1.1.1] — 2026-09-12
+
+Every quality now downloads the picture it promises.
+
+### Fixed
+- **1080p was not really 1080p** — at any size you picked, the app took the thinnest copy available. On YouTube that copy carries roughly a third of the data of the sharper one at the very same resolution, which is why a 1080p download could still arrive soft. Every quality now takes the fuller copy — around **2.5× more picture at 1080p**, measured on a real video
+- **"Best" never gave you the best** — it was restricted to the copies that arrive with sound already attached, so a 4K video came down as 1080p, and on some videos as **360p**. "Best" now downloads the real thing
+- Video arrives as **H.264 with AAC sound** — the one combination every phone decodes in hardware. The previous pick had no hardware support on most phones, and its audio track left some players showing a video with no sound at all
+- 4K no longer arrives in **HDR** on a phone that cannot display it, where it looked washed out and grey
+- **Vertical video** — a Short, Reel or TikTok is taller than the size you tap by definition, so the size filter matched nothing and quality quietly fell back to whatever was left. They now come down at full quality
+- Links from sites that never state a video's size — many Instagram, Facebook and X posts — no longer drop to a lower-quality copy for that reason alone
+
 ## [1.1.0] — 2026-09-07
 
 Photo posts now download, sharing shows real progress, and the engine keeps itself current — even if you never open the app.
